@@ -65,5 +65,4 @@ CORS_ALLOWED_ORIGIN_REGEXES = [r'{}'.format(s) for s in env.list("CORS_ALLOWED_O
 # CORS_ALLOWED_ORIGIN_REGEXES = [
 #     r"^http://localhost:3000$",  # works for local dev
 # ]
-print('CORS_ALLOWED_ORIGIN_REGEXES', CORS_ALLOWED_ORIGIN_REGEXES)
 # ------------------------------------------------------------------------------

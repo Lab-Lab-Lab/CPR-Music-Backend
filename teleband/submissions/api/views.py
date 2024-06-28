@@ -5,7 +5,7 @@ from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, CreateMode
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 from teleband.submissions.api.teacher_serializers import TeacherSubmissionSerializer
-
+from django.db.models import OuterRef, Subquery
 
 from .serializers import (
     GradeSerializer,
@@ -72,18 +72,29 @@ class TeacherSubmissionViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
         piece_slug = request.GET["piece_slug"]
         activity_name = request.GET["activity_name"]
 
-        queryset = (
+        # https://chatgpt.com/share/827ac4eb-110d-423c-a106-1e696059fc83
+        # Define a subquery to get the latest submission for each enrollment
+        latest_submissions = (
             Submission.objects.filter(
+                assignment__enrollment=OuterRef("assignment__enrollment"),
                 assignment__enrollment__course__slug=course_id,
                 assignment__activity__activity_type__name=activity_name,
                 assignment__part__piece__slug=piece_slug,
             )
-            .order_by("assignment__enrollment", "-submitted")
-            .distinct("assignment__enrollment")
+            .order_by("-submitted")
+            .values("pk")[:1]
         )
 
+        # Use the subquery to filter the main queryset
+        filtered_submissions = Submission.objects.filter(
+            pk__in=Subquery(latest_submissions)
+        ).order_by("assignment__enrollment", "-submitted")
+
+        # The final queryset will have the latest submissions for each enrollment
+        submissions = filtered_submissions
+
         serializer = self.serializer_class(
-            queryset, many=True, context={"request": request}
+            submissions, many=True, context={"request": request}
         )
         return Response(status=status.HTTP_200_OK, data=serializer.data)
 

@@ -6,8 +6,13 @@ from .models import Submission, SubmissionAttachment, Grade
 
 @admin.register(Submission)
 class SubmissionAdmin(VersionAdmin):
-    list_display = ("id", "assignment", "submitted",)
+    list_display = (
+        "id",
+        "assignment",
+        "submitted",
+    )
     list_filter = ("assignment__piece",)
+    raw_id_fields = ("assignment",)
 
 
 @admin.register(SubmissionAttachment)
@@ -27,7 +32,7 @@ class GradeAdmin(VersionAdmin):
         "rhythm",
         "tone",
         "expression",
-        "created_at"
+        "created_at",
     )
     # list_filter = ("student_submission", "own_submission", "grader")
     list_filter = ("grader",)

@@ -4,8 +4,13 @@ from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, UpdateModelMixin
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+from django.db.models import OuterRef, Subquery
 
-from .serializers import AssignmentViewSetSerializer, AssignmentInstrumentSerializer, AssignmentSerializer
+from .serializers import (
+    AssignmentViewSetSerializer,
+    AssignmentInstrumentSerializer,
+    AssignmentSerializer,
+)
 from teleband.assignments.api.serializers import ActivitySerializer, PiecePlanSerializer
 from teleband.musics.api.serializers import PartTranspositionSerializer
 
@@ -29,13 +34,21 @@ class ActivityViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):
     permission_classes = [IsTeacher]
 
     def get_queryset(self):
-        return self.queryset.filter(
-            pk__in=Assignment.objects.filter(
-                enrollment__course__slug=self.kwargs["course_slug_slug"]
+        # Define a subquery to get the first assignment for each activity
+        distinct_activity_assignments = (
+            Assignment.objects.filter(
+                enrollment__course__slug=self.kwargs["course_slug_slug"],
+                activity=OuterRef("id"),
             )
-            .distinct("activity")
-            .values_list("pk", flat=True)
+            .order_by("id", "pk")
+            .values("activity_id")[:1]
         )
+
+        # Use the subquery to filter the main queryset
+        queryset = self.queryset.filter(pk__in=Subquery(distinct_activity_assignments))
+
+        return queryset
+
 
 class AssignmentViewSet(
     RetrieveModelMixin, UpdateModelMixin, ListModelMixin, GenericViewSet
@@ -71,16 +84,36 @@ class AssignmentViewSet(
         role = self.request.user.enrollment_set.get(course=course).role
 
         if role.name == "Student":
-            return Assignment.objects.filter(
-                enrollment__course=course, enrollment__user=self.request.user
-            ).select_related("activity", "instrument", "piece", "activity__part_type", "instrument__transposition", "group").prefetch_related("submissions")
+            return (
+                Assignment.objects.filter(
+                    enrollment__course=course, enrollment__user=self.request.user
+                )
+                .select_related(
+                    "activity",
+                    "instrument",
+                    "piece",
+                    "activity__part_type",
+                    "instrument__transposition",
+                    "group",
+                )
+                .prefetch_related("submissions")
+            )
         if role.name == "Teacher":
-            return Assignment.objects.filter(enrollment__course=course).select_related("activity", "instrument", "piece", "activity__part_type", "instrument__transposition", "group")
+            return Assignment.objects.filter(enrollment__course=course).select_related(
+                "activity",
+                "instrument",
+                "piece",
+                "activity__part_type",
+                "instrument__transposition",
+                "group",
+            )
 
     def list(self, request, *args, **kwargs):
         assignments = self.get_queryset()
 
-        serialized = AssignmentViewSetSerializer(assignments, context={'request': request}, many=True)
+        serialized = AssignmentViewSetSerializer(
+            assignments, context={"request": request}, many=True
+        )
 
         grouped = defaultdict(list)
         for assignment in serialized.data:
@@ -101,16 +134,14 @@ class AssignmentViewSet(
         }
 
         # FIXME: this should respect order from server/pieceplan and mayeb do this as a backup?
-        orderFromActivityType = lambda a: ordering[a['activity_type_name'].split()[0]]
+        orderFromActivityType = lambda a: ordering[a["activity_type_name"].split()[0]]
         for pieceplan in grouped:
             grouped[pieceplan].sort(key=orderFromActivityType)
 
         return Response(grouped)
 
 
-class PiecePlanViewSet(
-    RetrieveModelMixin, ListModelMixin, GenericViewSet
-):
+class PiecePlanViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):
     serializer_class = PiecePlanSerializer
     queryset = PiecePlan.objects.prefetch_related("piece")
     lookup_field = "id"
@@ -118,7 +149,9 @@ class PiecePlanViewSet(
 
     def get_queryset(self):
         course = Course.objects.get(slug=self.kwargs["course_slug_slug"])
-        return PiecePlan.objects.filter(curriculum__course=course).prefetch_related("piece")
+        return PiecePlan.objects.filter(curriculum__course=course).prefetch_related(
+            "piece"
+        )
 
     # def get_serializer_class(self):
     #     if self.action == "create":
