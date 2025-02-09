@@ -3,7 +3,7 @@ name: Check Python Code Formatting
 on:
   pull_request:
     branches:
-      - main
+      - dev
 
 jobs:
   format-check:
