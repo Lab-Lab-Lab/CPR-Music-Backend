@@ -185,13 +185,13 @@ class CourseViewSet(
                         response["existing"].append(user)
                     else:
                         response["invalid"].append(
-                            {
-                                "name": name,
-                                "username": username,
-                                "password": password,
-                                "grade": grade,
-                                "reason": "Wrong password",  # real bad
-                            }
+                                User.objects.create_user(
+                                    name=name,
+                                    username=username,
+                                    password=password,
+                                    grade=grade,
+                                    reason="Wrong password"
+                                )
                         )
                 except User.DoesNotExist:
                     response["created"].append(
