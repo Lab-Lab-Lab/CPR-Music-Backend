@@ -1,11 +1,35 @@
-FROM python:3.10
+FROM python:3.13-slim AS builder
+
+RUN mkdir /app
 
 WORKDIR /app
 
-COPY requirements/ requirements/
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-COPY . .
+RUN pip install --upgrade pip
+COPY requirements.txt /app/
+COPY requirements/ /app/
+RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["gunicorn", "--workers", "4", "--bind", "unix:/app/asgi.sock", "config.asgi:application"]
+FROM python:3.13-slim
+
+RUN useradd -m -r appuser && \
+    mkdir /app && \
+    chown -R appuser /app
+
+COPY --from=builder /usr/local/lib/python3.13/site-packages/ /usr/local/lib/python3.13/site-packages/
+COPY --from=builder /usr/local/bin/ /usr/local/bin
+
+WORKDIR /app
+
+COPY --chown=appuser:appuser . .
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN chmod +x /app/entrypoint.prod.sh
+
+EXPOSE 8000
+
+CMD ["/app/entrypoint.prod.sh"]
