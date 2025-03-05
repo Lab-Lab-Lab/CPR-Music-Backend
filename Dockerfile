@@ -17,5 +17,5 @@ CMD ["sh", "-c", "gunicorn config.asgi:application \
     --workers $NUM_WORKERS \
     -k uvicorn.workers.UvicornWorker \
     --bind unix:$SOCKFILE \
-    --log-llevel=debug \
+    --log-level=debug \
     --log-file=/app/logs/gunicorn.log"]
