@@ -8,14 +8,6 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-ENV NUM_WORKERS=4
+RUN mkdir -p /app/asgi.sock
 
-ARG SOCKFILE
-
-CMD ["sh", "-c", "gunicorn config.asgi:application \
-    --name django-backend \
-    --workers $NUM_WORKERS \
-    -k uvicorn.workers.UvicornWorker \
-    --bind unix:$SOCKFILE \
-    --log-level=debug \
-    --log-file=/app/logs/gunicorn.log"]
+CMD ["gunicorn", "--workers", "4", "--bind", "unix:/app/asgi.sock", "config.asgi:application"]
