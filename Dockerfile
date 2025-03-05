@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS builder
+FROM python:3.10-slim AS builder
 
 RUN mkdir /app
 
@@ -12,13 +12,13 @@ COPY requirements.txt /app/
 COPY requirements/ /app/requirements/
 RUN pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.13-slim
+FROM python:3.10-slim
 
 RUN useradd -m -r appuser && \
     mkdir /app && \
     chown -R appuser /app
 
-COPY --from=builder /usr/local/lib/python3.13/site-packages/ /usr/local/lib/python3.13/site-packages/
+COPY --from=builder /usr/local/lib/python3.10/site-packages/ /usr/local/lib/python3.10/site-packages/
 COPY --from=builder /usr/local/bin/ /usr/local/bin
 
 WORKDIR /app
