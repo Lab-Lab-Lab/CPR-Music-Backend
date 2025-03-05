@@ -8,6 +8,4 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /app/asgi.sock
-
 CMD ["gunicorn", "--workers", "4", "--bind", "unix:/app/asgi.sock", "config.asgi:application"]
