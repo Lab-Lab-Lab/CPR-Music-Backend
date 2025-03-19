@@ -1,0 +1,62 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set environment variables
+      run: |
+        if [[ "${{ github.ref }}" == "refs/head/main" ]]; then
+          echo "DEPLOY_DIR=/data/MusicCPRProd" >> $GITHUB_ENV
+          echo "IMAGE_NAME=backend:prod" >> $GITHUB_ENV
+          echo "CONTAINER_NAME=backend-prod" >> $GITHUB_ENV
+          echo "HOST_POST=8001" >> $GITHUB_ENV
+        else
+          echo "DEPLOY_DIR=/data/MusicCPRDev" >> $GITHUB_ENV
+          echo "IMAGE_NAME=backend:dev" >> $GITHUB_ENV
+          echo "CONTAINER_NAME=backend-dev" >> $GITHUB_ENV
+          echo "HOST_POST=8000" >> $GITHUB_ENV
+        fi
+    - name: Set up SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Deploy to EC2
+      run: |
+        ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          set -e
+          echo "Deploying to ${{ env.DEPLOY_DIR }}"
+
+          cd ${{ env.DEPLOY_DIR }}
+
+          echo "Pulling latest changes..."
+          git pull origin ${{ github.ref_name }}
+
+          echo "Stopping and removing old container"
+          docker stop ${{ env.CONTAINER_NAME }} || true
+          docker rm ${{ env.CONTAINER_NAME }} || true
+
+          echo "Removing old image"
+          docker rmi ${{ env.IMAGE_NAME }} || true
+
+          echo "Building new image..."
+          docker build -t ${{ env.IMAGE_NAME }} .
+
+          echo "Starting new container..."
+          docker run -d --name ${{ env.CONTAINER_NAME }} \
+                -p ${{ env.HOST_PORT }}:8000 \
+                -v ./.env:/app/.env \
+                ${{ env.IMAGE_NAME }}
+
