@@ -55,9 +55,8 @@ jobs:
             docker build -t ${{ env.IMAGE_NAME }} .
 
             echo "Starting new container..."
-            echo "Listening on port ${{ env.HOST_PORT }}"
             docker run -d --name ${{ env.CONTAINER_NAME }} \
                   -p ${{ env.HOST_PORT }}:8000 \
                   -v ./.env:/app/.env \
                   ${{ env.IMAGE_NAME }}
-            EOF
+          EOF
