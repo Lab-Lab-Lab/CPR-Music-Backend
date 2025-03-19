@@ -59,4 +59,3 @@ jobs:
                 -p ${{ env.HOST_PORT }}:8000 \
                 -v ./.env:/app/.env \
                 ${{ env.IMAGE_NAME }}
-
