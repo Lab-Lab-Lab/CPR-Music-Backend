@@ -19,12 +19,12 @@ jobs:
             echo "DEPLOY_DIR=/data/MusicCPRProd" >> $GITHUB_ENV
             echo "IMAGE_NAME=backend:prod" >> $GITHUB_ENV
             echo "CONTAINER_NAME=backend-prod" >> $GITHUB_ENV
-            echo "HOST_POST=8001" >> $GITHUB_ENV
+            echo "HOST_PORT=8001" >> $GITHUB_ENV
           else
             echo "DEPLOY_DIR=/data/MusicCPRDev" >> $GITHUB_ENV
             echo "IMAGE_NAME=backend:dev" >> $GITHUB_ENV
             echo "CONTAINER_NAME=backend-dev" >> $GITHUB_ENV
-            echo "HOST_POST=8000" >> $GITHUB_ENV
+            echo "HOST_PORT=8000" >> $GITHUB_ENV
           fi
       - name: Set up SSH
         run: |
@@ -60,3 +60,4 @@ jobs:
                   -p ${{ env.HOST_PORT }}:8000 \
                   -v ./.env:/app/.env \
                   ${{ env.IMAGE_NAME }}
+            EOF
