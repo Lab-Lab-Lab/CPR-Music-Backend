@@ -16,7 +16,7 @@ jobs:
 
       - name: Set environment variables
         run: |
-          if [[ "${{ github.ref }}" == "refs/head/main" ]]; then
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "DEPLOY_DIR=/data/MusicCPRProd" >> $GITHUB_ENV
             echo "IMAGE_NAME=backend:prod" >> $GITHUB_ENV
             echo "CONTAINER_NAME=backend-prod" >> $GITHUB_ENV
