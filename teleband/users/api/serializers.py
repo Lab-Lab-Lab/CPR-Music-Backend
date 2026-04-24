@@ -41,4 +41,4 @@ class UserInstrumentSerializer(serializers.ModelSerializer):
 class UserInstrumentConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = InstrumentConfig
-        fields = ["id", "name", "description", "settings"]
+        fields = ["id", "name", "description", "settings", "file"]

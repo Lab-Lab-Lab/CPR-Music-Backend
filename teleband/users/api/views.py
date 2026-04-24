@@ -34,7 +34,7 @@ from .serializers import (
 )
 from teleband.courses.models import Enrollment, Course
 from teleband.users.models import InstrumentConfig
-
+from django.db.models import Q
 User = get_user_model()
 Invitation = get_invitation_model()
 
@@ -153,8 +153,12 @@ class UserInstrumentConfigViewSet(ModelViewSet):
     serializer_class = UserInstrumentConfigSerializer
     queryset = InstrumentConfig.objects.all()
 
+
     def get_queryset(self):
-        return self.request.user.instrumentconfig_set.all()
+        return InstrumentConfig.objects.filter(Q(user=self.request.user) | Q(user=None))
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
 
 obtain_delete_auth_token = ObtainDeleteAuthToken.as_view()
