@@ -5,6 +5,7 @@
 wheel==0.43.0 # https://idk
 gunicorn==22.0.0 # https://github.com/benoitc/gunicorn
 psycopg[binary]>=3.0.0 # https://github.com/psycopg/psycopg
+psycopg[pool]>=3.0.0 # See https://docs.djangoproject.com/en/6.0/ref/databases/#connection-pool
 Collectfast==2.2.0 # https://github.com/antonagestam/collectfast
 
 boto3==1.34.145
