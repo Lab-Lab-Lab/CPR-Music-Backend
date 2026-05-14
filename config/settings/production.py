@@ -19,6 +19,7 @@ DATABASES = {
 }
 DATABASES["default"] = env.db("DATABASE_URL")  # noqa F405
 DATABASES["default"]["ATOMIC_REQUESTS"] = True  # noqa F405
+DATABASES["default"]["CONN_MAX_AGE"] = 0
 DATABASES["default"]["OPTIONS"] = {
     "pool": {
         "min_size": 2,
