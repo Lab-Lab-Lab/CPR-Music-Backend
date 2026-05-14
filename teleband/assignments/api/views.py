@@ -14,7 +14,7 @@ from .serializers import (
 from teleband.assignments.api.serializers import ActivitySerializer, PiecePlanSerializer
 from teleband.musics.api.serializers import PartTranspositionSerializer
 
-from teleband.assignments.models import Assignment, Activity, AssignmentGroup, PiecePlan
+from teleband.assignments.models import Assignment, Activity, AssignmentGroup, PlannedActivity, PiecePlan
 from teleband.courses.models import Course
 from teleband.utils.permissions import IsTeacher
 
@@ -120,7 +120,22 @@ class AssignmentViewSet(
             key = assignment["piece_slug"]
             grouped[key].append(assignment)
 
-        ordering = {
+        # Build a lookup of (piece_plan_id, activity_id) -> order from PlannedActivity
+        piece_plan_ids = {a.piece_plan_id for a in assignments if a.piece_plan_id}
+        planned_order = {}
+        for pa in PlannedActivity.objects.filter(piece_plan_id__in=piece_plan_ids):
+            planned_order[(pa.piece_plan_id, pa.activity_id)] = pa.order
+
+        # Map assignment id -> planned activity order
+        assignment_plan_order = {}
+        for a in assignments:
+            if a.piece_plan_id:
+                assignment_plan_order[a.id] = planned_order.get(
+                    (a.piece_plan_id, a.activity_id)
+                )
+
+        # Fallback ordering by activity type name prefix
+        fallback_ordering = {
             "Melody": 1,
             "Bassline": 2,
             "Creativity": 3,
@@ -133,10 +148,14 @@ class AssignmentViewSet(
             "BasslinePost": 3.2,
         }
 
-        # FIXME: this should respect order from server/pieceplan and mayeb do this as a backup?
-        orderFromActivityType = lambda a: ordering[a["activity_type_name"].split()[0]]
+        def sort_key(a):
+            plan_order = assignment_plan_order.get(a["id"])
+            if plan_order is not None:
+                return (0, plan_order)
+            return (1, fallback_ordering.get(a["activity_type_name"].split()[0], 999))
+
         for pieceplan in grouped:
-            grouped[pieceplan].sort(key=orderFromActivityType)
+            grouped[pieceplan].sort(key=sort_key)
 
         return Response(grouped)
 
