@@ -20,6 +20,13 @@ DATABASES = {
 DATABASES["default"] = env.db("DATABASE_URL")  # noqa F405
 DATABASES["default"]["ATOMIC_REQUESTS"] = True  # noqa F405
 DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=60)  # noqa F405
+DATABASES["default"]["OPTIONS"] = {
+    "pool": {
+        "min_size": 2,
+        "max_size": env.int("DB_POOL_MAX_SIZE", default=10),
+        "timeout": 30,
+    }
+}
 
 # CACHES
 # ------------------------------------------------------------------------------
