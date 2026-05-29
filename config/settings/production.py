@@ -205,6 +205,11 @@ LOGGING = {
             "handlers": ["console"],
             "propagate": True,
         },
+        "anymail": {
+            "handlers": ["console", "applogfile"],
+            "level": "DEBUG",
+            "propagate": True,
+        },
     },
 }
 

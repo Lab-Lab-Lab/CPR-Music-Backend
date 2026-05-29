@@ -180,23 +180,25 @@ class CourseViewSet(
                 ):
                     continue
                 try:
-                    user = User.objects.get(username=username)
+                    trimmed = username.strip()
+                    user = User.objects.get(username=trimmed)
                     if user.check_password(password):
                         response["existing"].append(user)
                     else:
-                        response["invalid"].append(
-                            {
-                                "name": name,
-                                "username": username,
-                                "password": password,
-                                "grade": grade,
-                                "reason": "Wrong password",  # real bad
-                            }
+                        new_username = trimmed
+                        while True:
+                            new_username = f"{trimmed}{random.randint(1000, 9999)}"
+                            if not User.objects.filter(username=new_username).exists():
+                                break
+                        response["created"].append(
+                            User.objects.create_user(
+                                name=name, username=new_username, password=password, grade=grade
+                            )
                         )
                 except User.DoesNotExist:
                     response["created"].append(
                         User.objects.create_user(
-                            name=name, username=username, password=password, grade=grade
+                            name=name, username=trimmed, password=password, grade=grade
                         )
                     )
 
