@@ -171,7 +171,10 @@ class CourseViewSet(
 
             response = collections.defaultdict(list)
 
-            for name, username, password, grade in reader:
+            for row in reader:
+                if len(row) != 4:
+                    continue
+                name, username, password, grade = row
                 if (name, username, password, grade) == (
                     "fullname",
                     "username",
