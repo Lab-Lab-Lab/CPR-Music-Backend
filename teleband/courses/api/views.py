@@ -172,6 +172,9 @@ class CourseViewSet(
             response = collections.defaultdict(list)
 
             for row in reader:
+                # strip trailing empty fields (e.g. from trailing commas)
+                while row and row[-1] == "":
+                    row.pop()
                 if len(row) != 4:
                     continue
                 name, username, password, grade = row
