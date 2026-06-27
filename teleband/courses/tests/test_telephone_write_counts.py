@@ -13,6 +13,8 @@ from django.db import connection
 from teleband.assignments.models import (
     Assignment,
     AssignmentGroup,
+    CourseAssignment,
+    GroupAssignment,
     PiecePlan,
     PlannedActivity,
 )
@@ -79,3 +81,20 @@ def test_telephone_creates_one_group_per_block_and_one_assignment_per_student():
     # Every assignment belongs to a telephone group and the plan's piece.
     assert all(a.group_id is not None for a in created)
     assert Assignment.objects.filter(piece_plan=plan).count() == num_students
+
+
+def test_telephone_dual_writes_course_and_group_assignments():
+    num_students = NUM_ACTIVITIES * 4
+    course, plan = _setup(num_students)
+    assign_telephone_fixed(course, plan)
+
+    # One CourseAssignment per activity in the plan (not per student).
+    assert (
+        CourseAssignment.objects.filter(course=course, piece=plan.piece).count()
+        == NUM_ACTIVITIES
+    )
+    # One GroupAssignment per student (each student gets exactly one activity).
+    assert (
+        GroupAssignment.objects.filter(course_assignment__course=course).count()
+        == num_students
+    )

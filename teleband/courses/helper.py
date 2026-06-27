@@ -5,6 +5,8 @@ from teleband.assignments.models import (
     ActivityType,
     Assignment,
     AssignmentGroup,
+    CourseAssignment,
+    GroupAssignment,
     PiecePlan,
 )
 import random
@@ -25,6 +27,15 @@ def assign_one_piece_activity(course, piece, activity, deadline=None, piece_plan
     # update_or_create per student (which was 2 queries each and silently
     # swallowed the constraint violation on re-assign). Students who already have
     # the assignment are left untouched, matching the prior effective behavior.
+    # Phase 2 dual-write: the course-level row is the future source of truth; the
+    # per-student Assignment rows below remain until the read path is flipped.
+    CourseAssignment.objects.update_or_create(
+        course=course,
+        activity=activity,
+        piece=piece,
+        defaults={"piece_plan": piece_plan, "deadline": deadline},
+    )
+
     part = Part.for_activity(activity, piece)
     # NB: do NOT select_related("user") here. This helper is called from the live
     # data migration assignments/0033, where eagerly selecting all user columns
@@ -114,11 +125,24 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
     activities = list(piece_plan.activities.all())
     part_by_activity = {a.id: Part.for_activity(a, piece) for a in activities}
 
+    # Phase 2 dual-write: one CourseAssignment per activity for the course, plus a
+    # GroupAssignment per member restricting which student gets which activity.
+    course_assignment_by_activity = {
+        a.id: CourseAssignment.objects.update_or_create(
+            course=course,
+            activity=a,
+            piece=piece,
+            defaults={"piece_plan": piece_plan, "deadline": deadline},
+        )[0]
+        for a in activities
+    }
+
     group_objs = AssignmentGroup.objects.bulk_create(
         [AssignmentGroup(type="telephone_fixed") for _ in groups]
     )
 
     to_create = []
+    group_memberships = []
     for group, assignment_group in zip(groups, group_objs):
         for e, a in zip(group, activities):
             to_create.append(
@@ -132,6 +156,14 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
                     group=assignment_group,
                 )
             )
+            group_memberships.append(
+                GroupAssignment(
+                    group=assignment_group,
+                    enrollment=e,
+                    course_assignment=course_assignment_by_activity[a.id],
+                )
+            )
+    GroupAssignment.objects.bulk_create(group_memberships, ignore_conflicts=True)
     return Assignment.objects.bulk_create(to_create)
 
 

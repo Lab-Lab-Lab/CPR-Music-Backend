@@ -9,7 +9,7 @@ import pytest
 from django.test.utils import CaptureQueriesContext
 from django.db import connection
 
-from teleband.assignments.models import Assignment
+from teleband.assignments.models import Assignment, CourseAssignment
 from teleband.assignments.tests.factories import ActivityFactory
 from teleband.courses.helper import assign_one_piece_activity
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
@@ -74,4 +74,18 @@ def test_assign_one_activity_is_idempotent():
             activity=activity, piece=piece, enrollment__course=course
         ).count()
         == 5
+    )
+
+
+def test_assign_one_activity_creates_single_course_assignment():
+    # Phase 2 dual-write: one CourseAssignment per (course, activity, piece)
+    # regardless of roster size, and idempotent on re-assign.
+    course, piece, activity = _setup(5)
+    assign_one_piece_activity(course, piece, activity, piece_plan=None)
+    assign_one_piece_activity(course, piece, activity, piece_plan=None)
+    assert (
+        CourseAssignment.objects.filter(
+            course=course, activity=activity, piece=piece
+        ).count()
+        == 1
     )
