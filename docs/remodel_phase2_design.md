@@ -2,8 +2,9 @@
 
 > Builds on the advisor's plan ([`remodel_assignments.md`](./remodel_assignments.md)) and
 > [`remodel_campaign.md`](./remodel_campaign.md). Phase 1 (1a/1b/1c) is shipped on
-> `backend-remodel-phase1` (PR #56). This document scopes the structural remodel; it is a
-> design to review and decide on, **not yet implemented**.
+> `backend-remodel-phase1` (PR #56). **Decision: Option B (fully dynamic).** Steps 1–6 of the
+> sequence below are built and committed; steps 7–8 (the contract-sensitive read-path flip and
+> dropping `Assignment`) remain. Option A is retained below as the rejected alternative.
 
 ## Decisions locked (2026-06-27)
 
