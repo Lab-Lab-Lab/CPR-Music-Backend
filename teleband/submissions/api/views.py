@@ -171,11 +171,41 @@ class ActivityProgressViewSet(GenericViewSet):
     serializer_class = ActivityProgressSerializer
     queryset = ActivityProgress.objects.all()
 
+    @staticmethod
+    def _phase2_defaults(assignment_id):
+        # Resolve course_assignment + enrollment from the per-student assignment so
+        # newly-created progress is dual-keyed during the Phase 2 transition.
+        assignment = (
+            Assignment.objects.select_related("enrollment", "part__piece")
+            .filter(pk=assignment_id)
+            .first()
+        )
+        if assignment is None:
+            return {}
+        piece_id = assignment.piece_id or assignment.part.piece_id
+        course_assignment = CourseAssignment.objects.filter(
+            course_id=assignment.enrollment.course_id,
+            activity_id=assignment.activity_id,
+            piece_id=piece_id,
+        ).first()
+        return {
+            "course_assignment": course_assignment,
+            "enrollment_id": assignment.enrollment_id,
+        }
+
+    def _get_or_create_progress(self, assignment_id, lock=False):
+        manager = ActivityProgress.objects
+        if lock:
+            manager = manager.select_for_update()
+        return manager.get_or_create(
+            assignment_id=assignment_id,
+            defaults=self._phase2_defaults(assignment_id),
+        )
+
     def get_object(self):
         """Get or create progress for the current assignment."""
-        assignment_id = self.kwargs.get("assignment_id")
-        progress, created = ActivityProgress.objects.get_or_create(
-            assignment_id=assignment_id
+        progress, created = self._get_or_create_progress(
+            self.kwargs.get("assignment_id")
         )
         return progress
 
@@ -193,11 +223,8 @@ class ActivityProgressViewSet(GenericViewSet):
         try:
             # Use transaction with row-level locking to prevent race conditions
             with transaction.atomic():
-                (
-                    progress,
-                    created,
-                ) = ActivityProgress.objects.select_for_update().get_or_create(
-                    assignment_id=assignment_id
+                progress, created = self._get_or_create_progress(
+                    assignment_id, lock=True
                 )
 
                 # Extract event data from request
@@ -254,11 +281,8 @@ class ActivityProgressViewSet(GenericViewSet):
 
         try:
             with transaction.atomic():
-                (
-                    progress,
-                    created,
-                ) = ActivityProgress.objects.select_for_update().get_or_create(
-                    assignment_id=assignment_id
+                progress, created = self._get_or_create_progress(
+                    assignment_id, lock=True
                 )
 
                 # If a step was submitted, use it as the step being completed
@@ -309,9 +333,7 @@ class ActivityProgressViewSet(GenericViewSet):
         assignment_id = kwargs.get("assignment_id")
 
         try:
-            progress, created = ActivityProgress.objects.get_or_create(
-                assignment_id=assignment_id
-            )
+            progress, created = self._get_or_create_progress(assignment_id)
 
             question_id = request.data.get("question_id")
             response_text = request.data.get("response")
@@ -333,11 +355,8 @@ class ActivityProgressViewSet(GenericViewSet):
 
         try:
             with transaction.atomic():
-                (
-                    progress,
-                    created,
-                ) = ActivityProgress.objects.select_for_update().get_or_create(
-                    assignment_id=assignment_id
+                progress, created = self._get_or_create_progress(
+                    assignment_id, lock=True
                 )
 
                 # Extract audio state from request

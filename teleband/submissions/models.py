@@ -96,6 +96,19 @@ class ActivityProgress(models.Model):
     assignment = models.OneToOneField(
         Assignment, on_delete=models.CASCADE, related_name="activity_progress"
     )
+    # Phase 2: progress is per (course_assignment, enrollment). Nullable during the
+    # transition (dual-populated from `assignment`); the unique (course_assignment,
+    # enrollment) constraint and dropping `assignment` happen when reads flip.
+    course_assignment = models.ForeignKey(
+        "assignments.CourseAssignment",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="activity_progress",
+    )
+    enrollment = models.ForeignKey(
+        "courses.Enrollment", on_delete=models.CASCADE, null=True, blank=True
+    )
     current_step = models.PositiveIntegerField(default=1)  # 1-4 for Activities 1-4
     step_completions = models.JSONField(
         default=dict,
