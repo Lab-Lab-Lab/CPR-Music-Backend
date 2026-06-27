@@ -14,7 +14,13 @@ from .serializers import (
 from teleband.assignments.api.serializers import ActivitySerializer, PiecePlanSerializer
 from teleband.musics.api.serializers import PartTranspositionSerializer
 
-from teleband.assignments.models import Assignment, Activity, AssignmentGroup, PlannedActivity, PiecePlan
+from teleband.assignments.models import (
+    Assignment,
+    Activity,
+    AssignmentGroup,
+    PlannedActivity,
+    PiecePlan,
+)
 from teleband.courses.models import Course
 from teleband.utils.permissions import IsTeacher
 
@@ -109,18 +115,24 @@ class AssignmentViewSet(
         )
 
     def get_queryset(self):
-        course = Course.objects.get(slug=self.kwargs["course_slug_slug"])
-        role = self.request.user.enrollment_set.get(course=course).role
+        # One enrollment lookup (with its role) instead of a separate Course.get
+        # plus enrollment.get; filter assignments by the course slug directly.
+        slug = self.kwargs["course_slug_slug"]
+        role = (
+            self.request.user.enrollment_set.select_related("role")
+            .get(course__slug=slug)
+            .role
+        )
 
         if role.name == "Student":
             return self._optimized_queryset(
                 Assignment.objects.filter(
-                    enrollment__course=course, enrollment__user=self.request.user
+                    enrollment__course__slug=slug, enrollment__user=self.request.user
                 )
             )
         if role.name == "Teacher":
             return self._optimized_queryset(
-                Assignment.objects.filter(enrollment__course=course)
+                Assignment.objects.filter(enrollment__course__slug=slug)
             )
 
     def list(self, request, *args, **kwargs):
