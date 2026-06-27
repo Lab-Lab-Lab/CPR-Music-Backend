@@ -34,6 +34,26 @@ class Submission(models.Model):
     assignment = models.ForeignKey(
         Assignment, on_delete=models.PROTECT, related_name="submissions"
     )
+    # Phase 2: a submission belongs to a course-level CourseAssignment and the
+    # student (enrollment) who made it, and records the instrument/part it was
+    # made with. Nullable during the transition (dual-populated from `assignment`);
+    # `assignment` is dropped once the read path no longer uses it.
+    course_assignment = models.ForeignKey(
+        "assignments.CourseAssignment",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="submissions",
+    )
+    enrollment = models.ForeignKey(
+        "courses.Enrollment", on_delete=models.PROTECT, null=True, blank=True
+    )
+    instrument = models.ForeignKey(
+        "instruments.Instrument", on_delete=models.PROTECT, null=True, blank=True
+    )
+    part = models.ForeignKey(
+        "musics.Part", on_delete=models.PROTECT, null=True, blank=True
+    )
     index = models.PositiveIntegerField(default=0)
     submitted = models.DateTimeField(auto_now_add=True)
     content = models.TextField(blank=True)

@@ -16,8 +16,13 @@ from .serializers import (
 )
 
 from teleband.courses.models import Course
-from teleband.submissions.models import Grade, Submission, SubmissionAttachment, ActivityProgress
-from teleband.assignments.models import Assignment
+from teleband.submissions.models import (
+    Grade,
+    Submission,
+    SubmissionAttachment,
+    ActivityProgress,
+)
+from teleband.assignments.models import Assignment, CourseAssignment
 from datetime import datetime
 
 
@@ -31,8 +36,24 @@ class SubmissionViewSet(
         return self.queryset.filter(assignment_id=self.kwargs["assignment_id"])
 
     def perform_create(self, serializer):
+        # Phase 2 dual-populate: also record the course-level assignment, the
+        # student (enrollment), and the instrument/part the work was made with,
+        # all resolved from the per-student assignment.
+        assignment = Assignment.objects.select_related(
+            "enrollment", "instrument", "part__piece"
+        ).get(pk=self.kwargs["assignment_id"])
+        piece_id = assignment.piece_id or assignment.part.piece_id
+        course_assignment = CourseAssignment.objects.filter(
+            course_id=assignment.enrollment.course_id,
+            activity_id=assignment.activity_id,
+            piece_id=piece_id,
+        ).first()
         serializer.save(
-            assignment=Assignment.objects.get(pk=self.kwargs["assignment_id"])
+            assignment=assignment,
+            course_assignment=course_assignment,
+            enrollment=assignment.enrollment,
+            instrument=assignment.instrument,
+            part=assignment.part,
         )
 
     # @action(detail=False)
@@ -172,7 +193,10 @@ class ActivityProgressViewSet(GenericViewSet):
         try:
             # Use transaction with row-level locking to prevent race conditions
             with transaction.atomic():
-                progress, created = ActivityProgress.objects.select_for_update().get_or_create(
+                (
+                    progress,
+                    created,
+                ) = ActivityProgress.objects.select_for_update().get_or_create(
                     assignment_id=assignment_id
                 )
 
@@ -197,7 +221,7 @@ class ActivityProgressViewSet(GenericViewSet):
                     "timestamp": datetime.now().isoformat(),
                     "step": step,
                     "operation": operation,
-                    "data": data
+                    "data": data,
                 }
                 progress.activity_logs.append(event)
 
@@ -220,10 +244,7 @@ class ActivityProgressViewSet(GenericViewSet):
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=["post"])
     def submit_step(self, request, **kwargs):
@@ -233,7 +254,10 @@ class ActivityProgressViewSet(GenericViewSet):
 
         try:
             with transaction.atomic():
-                progress, created = ActivityProgress.objects.select_for_update().get_or_create(
+                (
+                    progress,
+                    created,
+                ) = ActivityProgress.objects.select_for_update().get_or_create(
                     assignment_id=assignment_id
                 )
 
@@ -243,7 +267,9 @@ class ActivityProgressViewSet(GenericViewSet):
                     submitted_step = int(submitted_step)
                     # Allow setting the step if it's valid (1-4)
                     if 1 <= submitted_step <= 4:
-                        print(f"📝 Submitted step: {submitted_step}, stored step was: {progress.current_step}")
+                        print(
+                            f"📝 Submitted step: {submitted_step}, stored step was: {progress.current_step}"
+                        )
                         # Set current_step to the submitted step (trust the frontend)
                         progress.current_step = submitted_step
 
@@ -255,7 +281,9 @@ class ActivityProgressViewSet(GenericViewSet):
                 if progress.current_step < 4:
                     old_step = progress.current_step
                     progress.current_step += 1
-                    print(f"✅ Advancing from step {old_step} to step {progress.current_step}")
+                    print(
+                        f"✅ Advancing from step {old_step} to step {progress.current_step}"
+                    )
 
                 progress.save()
 
@@ -267,12 +295,12 @@ class ActivityProgressViewSet(GenericViewSet):
         except ActivityProgress.DoesNotExist:
             return Response(
                 {"error": "Activity progress not found"},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
         except (ValueError, TypeError) as e:
             return Response(
                 {"error": f"Invalid step value: {e}"},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
     @action(detail=False, methods=["post"])
@@ -296,10 +324,7 @@ class ActivityProgressViewSet(GenericViewSet):
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=["post"])
     def save_audio_state(self, request, **kwargs):
@@ -308,7 +333,10 @@ class ActivityProgressViewSet(GenericViewSet):
 
         try:
             with transaction.atomic():
-                progress, created = ActivityProgress.objects.select_for_update().get_or_create(
+                (
+                    progress,
+                    created,
+                ) = ActivityProgress.objects.select_for_update().get_or_create(
                     assignment_id=assignment_id
                 )
 
@@ -328,14 +356,13 @@ class ActivityProgressViewSet(GenericViewSet):
                 progress.save()
 
             print(f"💾 Saved audio state for assignment {assignment_id}")
-            print(f"   audio_url: {progress.current_audio_url[:50] if progress.current_audio_url else None}...")
+            print(
+                f"   audio_url: {progress.current_audio_url[:50] if progress.current_audio_url else None}..."
+            )
             print(f"   edit_history length: {len(progress.audio_edit_history)}")
 
             serializer = self.serializer_class(progress)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         except Exception as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
