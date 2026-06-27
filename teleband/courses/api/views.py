@@ -110,7 +110,15 @@ class EnrollmentViewSet(
             ]
             return self.queryset.filter(course__in=courses)
 
-        return self.queryset.filter(user=self.request.user)
+        # EnrollmentSerializer nests course->owner, instrument->transposition,
+        # role, and user (UserSerializer -> groups).
+        return (
+            self.queryset.filter(user=self.request.user)
+            .select_related(
+                "course__owner", "instrument__transposition", "role", "user"
+            )
+            .prefetch_related("course__owner__groups", "user__groups")
+        )
 
     def get_serializer_class(self):
         if self.action == "update" or self.action == "partial_update":

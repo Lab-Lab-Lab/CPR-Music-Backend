@@ -128,6 +128,49 @@ class TestAssignmentListQueryCounts:
             f"({few} vs {many}) -- N+1 regression."
         )
 
+    def test_activity_list_constant_in_distinct_activities(self):
+        """ActivityViewSet (distinct activities used in a course) must not grow
+        per activity."""
+        teacher_role = RoleFactory(name="Teacher")
+        student_role = RoleFactory(name="Student")
+
+        def build(num_activities):
+            course = CourseFactory()
+            teacher = UserFactory()
+            EnrollmentFactory(user=teacher, course=course, role=teacher_role)
+            piece = PieceFactory()
+            enrollment = EnrollmentFactory(course=course, role=student_role)
+            for _ in range(num_activities):
+                part = PartFactory(piece=piece)
+                AssignmentFactory(
+                    activity=ActivityFactory(part_type=part.part_type),
+                    enrollment=enrollment,
+                    part=part,
+                    instrument=enrollment.instrument,
+                    piece=piece,
+                )
+            return course, teacher
+
+        small_course, small_teacher = build(2)
+        large_course, large_teacher = build(20)
+
+        client_small = APIClient()
+        client_small.force_authenticate(user=small_teacher)
+        with CaptureQueriesContext(connection) as ctx_s:
+            r_s = client_small.get(f"/api/courses/{small_course.slug}/activities/")
+        assert r_s.status_code == 200, r_s.content
+
+        client_large = APIClient()
+        client_large.force_authenticate(user=large_teacher)
+        with CaptureQueriesContext(connection) as ctx_l:
+            r_l = client_large.get(f"/api/courses/{large_course.slug}/activities/")
+        assert r_l.status_code == 200, r_l.content
+
+        assert len(ctx_s.captured_queries) == len(ctx_l.captured_queries), (
+            f"activity list query count grows with #activities "
+            f"({len(ctx_s.captured_queries)} vs {len(ctx_l.captured_queries)})."
+        )
+
     def test_grouped_assignments_constant_in_group_size(self):
         """GroupSerializer.get_members must be memoized: query count must not
         grow quadratically (or at all) with group membership size."""

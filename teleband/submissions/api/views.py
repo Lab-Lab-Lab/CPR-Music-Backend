@@ -137,11 +137,13 @@ class GradeViewSet(ModelViewSet):
     serializer_class = GradeSerializer
 
     def get_queryset(self, *args, **kwargs):
+        # GradeSerializer renders the reverse student_submission/own_submission
+        # one-to-ones; prefetch them so they aren't fetched per grade.
         return Grade.objects.filter(
             student_submission__assignment__enrollment__course__slug=self.kwargs[
                 "course_slug_slug"
             ]
-        )
+        ).prefetch_related("student_submission", "own_submission")
 
 
 class ActivityProgressViewSet(GenericViewSet):

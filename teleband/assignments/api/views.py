@@ -44,8 +44,11 @@ class ActivityViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):
             .values("activity_id")[:1]
         )
 
-        # Use the subquery to filter the main queryset
-        queryset = self.queryset.filter(pk__in=Subquery(distinct_activity_assignments))
+        # Use the subquery to filter the main queryset. select_related covers the
+        # activity_type/category/part_type walked by ActivitySerializer.
+        queryset = self.queryset.filter(
+            pk__in=Subquery(distinct_activity_assignments)
+        ).select_related("activity_type", "activity_type__category", "part_type")
 
         return queryset
 
@@ -180,8 +183,14 @@ class PiecePlanViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):
 
     def get_queryset(self):
         course = Course.objects.get(slug=self.kwargs["course_slug_slug"])
-        return PiecePlan.objects.filter(curriculum__course=course).prefetch_related(
-            "piece"
+        # PiecePlanSerializer walks piece->composer and activities->
+        # activity_type/category/part_type.
+        return (
+            PiecePlan.objects.filter(curriculum__course=course)
+            .select_related("piece__composer")
+            .prefetch_related(
+                "activities__activity_type__category", "activities__part_type"
+            )
         )
 
     # def get_serializer_class(self):
