@@ -141,10 +141,10 @@ response-equivalence snapshot of every touched endpoint *before* editing.
 - [x] **#22** `musics/models.py:65-76` (`Part.for_activity`) — cache the
   `PartType.objects.get(name="Melody")` lookup; drop the redundant `.exists()` before
   `.get()`. **Prerequisite for Phase 2** (the plan moves this call to read time).
-- [ ] **#23** `assignments/api/views.py:123-135` — annotate the queryset with a
+- [x] **#23** `assignments/api/views.py:123-135` — annotate the queryset with a
   correlated `Subquery` on `PlannedActivity.order` instead of rebuilding a Python dict
   per request.
-- [ ] **#24** `assignments/api/views.py:126` — add explicit `.order_by()` (the
+- [x] **#24** `assignments/api/views.py:126` — add explicit `.order_by()` (the
   `Meta.ordering` spanning `piece_plan__name` forces an unused sort).
 - [x] **#25** `assignments/models.py:57-73` (`PiecePlan.assign`) — delete (confirmed
   zero callers; a trap if reused).
