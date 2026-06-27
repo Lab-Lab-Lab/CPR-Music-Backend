@@ -88,7 +88,11 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
 
     # split the enrollments into groups of num_activities at random
     # and then assign the excess enrollments to the last group
-    enrollments = list(Enrollment.objects.filter(course=course, role__name="Student"))
+    enrollments = list(
+        Enrollment.objects.filter(course=course, role__name="Student").select_related(
+            "instrument"
+        )
+    )
     random.shuffle(enrollments)
     final_group = [] if excess_enrollments == 0 else enrollments[-excess_enrollments:]
     groups = [
@@ -102,20 +106,25 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
         final_group += used_enrollments[0 : num_activities - excess_enrollments]
         groups.append(final_group)
 
-    # create an assignment group for each group of enrollments
-    # and then assign each enrollment to an activity in the piece plan
-    # and add the assignment to the assignment group.
+    # create one AssignmentGroup per group of enrollments, then assign each
+    # enrollment to an activity in the piece plan within that group. Activities
+    # and their parts are resolved once (not per group/assignment), and the
+    # groups and assignments are each written in a single bulk_create.
     piece = piece_plan.piece
-    assignments = []
-    for group in groups:
-        assignment_group = AssignmentGroup.objects.create(type="telephone_fixed")
-        group_assignments = []
-        for e, a in zip(group, piece_plan.activities.all()):
-            part = Part.for_activity(a, piece)
-            group_assignments.append(
-                Assignment.objects.create(
+    activities = list(piece_plan.activities.all())
+    part_by_activity = {a.id: Part.for_activity(a, piece) for a in activities}
+
+    group_objs = AssignmentGroup.objects.bulk_create(
+        [AssignmentGroup(type="telephone_fixed") for _ in groups]
+    )
+
+    to_create = []
+    for group, assignment_group in zip(groups, group_objs):
+        for e, a in zip(group, activities):
+            to_create.append(
+                Assignment(
                     activity=a,
-                    part=part,
+                    part=part_by_activity[a.id],
                     enrollment=e,
                     instrument=e.instrument if e.instrument else e.user.instrument,
                     piece_plan=piece_plan,
@@ -123,8 +132,7 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
                     group=assignment_group,
                 )
             )
-        assignments += group_assignments
-    return assignments
+    return Assignment.objects.bulk_create(to_create)
 
 
 def assign_curriculum(course, curriculum, deadline=None):
