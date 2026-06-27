@@ -19,6 +19,33 @@
 helper/model code (`add_demos` is a documented no-op). Fresh `migrate` is now robust to
 the upcoming helper/model changes.
 
+### Blocker decisions (2026-06-27)
+
+1. **Instrument source of truth:** Enrollment first, then User — preserve the current
+   `e.instrument if e.instrument else e.user.instrument` fallback.
+2. **`telephone_fixed`:** keep a lightweight per-student group table. `CourseAssignment`
+   covers normal plans (every enrolled student is implicitly assigned every non-grouped
+   row); a `GroupAssignment(group, enrollment, course_assignment)` table records which
+   student gets which activity for grouped plans and restricts visibility to members.
+3. **Materialization:** resolve `part`/`instrument` at read time from the enrollment; persist
+   nothing per-student until the student submits (the `Submission` carries `instrument`/`part`).
+   `ActivityProgress` is `get_or_create((course_assignment, enrollment))` on first access.
+
+### Target models
+
+```
+CourseAssignment:  course, activity, piece, piece_plan?, deadline?, created_at
+                   unique(course, activity, piece)
+GroupAssignment:   group(AssignmentGroup), enrollment, course_assignment
+                   unique(enrollment, course_assignment)   # telephone_fixed only
+Submission(mod):   course_assignment, enrollment, instrument, part, + existing fields
+ActivityProgress(mod): course_assignment, enrollment (was OneToOne(Assignment))
+                   unique(course_assignment, enrollment)
+```
+
+Student's assignments = `CourseAssignment` for their course where the plan is not
+`telephone_fixed`, UNION the `CourseAssignment`s linked to them via `GroupAssignment`.
+
 ## Reframing: what Phase 1b already fixed
 
 The advisor's plan targets the per-student assignment row explosion. **Phase 1b already
@@ -109,18 +136,28 @@ This mirrors the phased discipline that worked for Phase 1.
 ## Proposed sequence (Option A)
 
 1. ✅ **Neutralize migration 0033** (done) — `add_demos` is a no-op; fresh `migrate` green.
-2. Add `CourseAssignment` model + unique `(course, activity, piece)`; no behavior change yet.
-3. Rewrite `assign_*` to create/update `CourseAssignment` (A rows). Keep creating `Assignment`
-   rows too (dual-write) so nothing breaks, OR switch to lazy materialization behind a read path.
-4. Add lazy materialization on the student read path: `AssignmentViewSet.get_queryset` ensures a
-   student's `Assignment` rows exist for every `CourseAssignment` in their course (bulk, idempotent).
-   Late joiners now resolved.
-5. Data migration: create `CourseAssignment` rows by collapsing existing `Assignment` rows
-   (group by course, activity, piece); handle legacy null-piece rows.
-6. (Optional, later → Option B) move `instrument`/`part` to `Submission`, re-key `ActivityProgress`,
-   make the list fully dynamic, drop per-student `Assignment`.
+2. ✅ **Add `CourseAssignment` + `GroupAssignment` models** (done) — additive, unique constraints,
+   factories + constraint tests.
+3. ✅ **Dual-write from `assign_*`** (done) — `assign_one_piece_activity` /
+   `assign_telephone_fixed` now also create `CourseAssignment` (and `GroupAssignment` per
+   telephone member). Per-student `Assignment` rows still written; old read path unaffected.
+4. ⬜ **Backfill data migration** — create `CourseAssignment` (and `GroupAssignment` for
+   telephone groups) from existing `Assignment` rows, collapsing by `(course, activity, piece)`.
+   Handle legacy `piece IS NULL` rows first.
+5. ⬜ **Add Submission fields** — `course_assignment`, `enrollment`, `instrument`, `part`
+   (nullable), dual-populate on create, backfill from existing `Submission.assignment`.
+6. ⬜ **Re-key `ActivityProgress`** — add `course_assignment` + `enrollment` (unique together),
+   backfill from `assignment`, keep `get_or_create` on first access.
+7. ⬜ **Flip the read path** — `AssignmentViewSet` (student + teacher), submissions, and
+   activity-progress endpoints resolve from `CourseAssignment`, computing `part`/`instrument`
+   per enrollment at read time and scoping nested routes by `request.user`. Response shape
+   preserved (id = `course_assignment.id`). THE contract-sensitive step; gate with
+   response-equivalence snapshots.
+8. ⬜ **Contract & drop** — once reads use `CourseAssignment`, stop writing `Assignment`,
+   then drop `Submission.assignment` / `ActivityProgress.assignment` / the `Assignment` model.
 
 Each step is independently shippable with query-count + response-equivalence tests, same as Phase 1.
+Steps 7–8 are the contract-sensitive half — review the dual-write foundation (PR #56) first.
 
 ## Open questions (decisions needed before building)
 
