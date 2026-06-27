@@ -31,8 +31,15 @@ class Submission(models.Model):
         null=True,
         related_name="own_submission",
     )
+    # Legacy per-student link. Nullable during the Phase 2 transition so late
+    # joiners (no Assignment row) can submit against a CourseAssignment; dropped
+    # in step 8 once reads no longer use it.
     assignment = models.ForeignKey(
-        Assignment, on_delete=models.PROTECT, related_name="submissions"
+        Assignment,
+        on_delete=models.PROTECT,
+        related_name="submissions",
+        null=True,
+        blank=True,
     )
     # Phase 2: a submission belongs to a course-level CourseAssignment and the
     # student (enrollment) who made it, and records the instrument/part it was
@@ -94,7 +101,11 @@ class ActivityProgress(models.Model):
     """Tracks student progress through DAW study activities."""
 
     assignment = models.OneToOneField(
-        Assignment, on_delete=models.CASCADE, related_name="activity_progress"
+        Assignment,
+        on_delete=models.CASCADE,
+        related_name="activity_progress",
+        null=True,
+        blank=True,
     )
     # Phase 2: progress is per (course_assignment, enrollment). Nullable during the
     # transition (dual-populated from `assignment`); the unique (course_assignment,
