@@ -39,8 +39,9 @@ def test_create_submission_dual_populates_phase2_fields():
     assignment, enrollment, ca = _assignment_in_course()
     client = APIClient()
     client.force_authenticate(user=enrollment.user)
+    # Phase 2: the nested route id is the CourseAssignment id.
     resp = client.post(
-        f"/api/courses/{enrollment.course.slug}/assignments/{assignment.id}/submissions/",
+        f"/api/courses/{enrollment.course.slug}/assignments/{ca.id}/submissions/",
         {"content": "hi"},
         format="json",
     )

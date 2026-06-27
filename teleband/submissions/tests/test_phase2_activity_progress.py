@@ -38,12 +38,13 @@ def test_progress_created_via_api_is_dual_keyed():
     assignment, enrollment, ca = _assignment_with_ca()
     client = APIClient()
     client.force_authenticate(user=enrollment.user)
+    # Phase 2: the nested route id is the CourseAssignment id.
     resp = client.get(
-        f"/api/courses/{enrollment.course.slug}/assignments/{assignment.id}/activity-progress/"
+        f"/api/courses/{enrollment.course.slug}/assignments/{ca.id}/activity-progress/"
     )
     assert resp.status_code == 200, resp.content
 
-    progress = ActivityProgress.objects.get(assignment=assignment)
+    progress = ActivityProgress.objects.get(course_assignment=ca, enrollment=enrollment)
     assert progress.course_assignment_id == ca.id
     assert progress.enrollment_id == enrollment.id
 

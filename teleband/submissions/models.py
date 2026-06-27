@@ -73,7 +73,9 @@ class Submission(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.assignment.id}"
+        # assignment is nullable in Phase 2 (late joiners); fall back to the
+        # course-level assignment / submission id.
+        return f"{self.assignment_id or self.course_assignment_id or self.id}"
 
 
 class SubmissionAttachment(models.Model):
@@ -158,4 +160,7 @@ class ActivityProgress(models.Model):
         verbose_name_plural = "Activity Progress"
 
     def __str__(self):
-        return f"Assignment {self.assignment.id} - Step {self.current_step}"
+        # assignment is nullable in Phase 2 (late joiners); fall back to the
+        # course-level assignment.
+        ref = self.assignment_id or self.course_assignment_id
+        return f"Assignment {ref} - Step {self.current_step}"

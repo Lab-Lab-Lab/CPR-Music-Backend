@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, CreateModelMixin
@@ -23,7 +24,45 @@ from teleband.submissions.models import (
     ActivityProgress,
 )
 from teleband.assignments.models import Assignment, CourseAssignment
+from teleband.assignments.api.serializers import resolve_instrument
+from teleband.musics.models import Part
 from datetime import datetime
+
+
+def resolve_student_target(request, course_slug, course_assignment_id):
+    """Resolve the (course_assignment, enrollment) a student's nested route refers
+    to. Phase 2: the URL id is a CourseAssignment id (the list contract), scoped to
+    the requesting user's enrollment in the course. Returns (course_assignment,
+    enrollment); raises Http404 if the student has no enrollment in the course or
+    no such CourseAssignment."""
+    enrollment = get_object_or_404(
+        request.user.enrollment_set.select_related("course"),
+        course__slug=course_slug,
+    )
+    course_assignment = get_object_or_404(
+        CourseAssignment.objects.select_related(
+            "activity", "activity__part_type", "piece"
+        ),
+        pk=course_assignment_id,
+        course=enrollment.course,
+    )
+    return course_assignment, enrollment
+
+
+def resolve_legacy_assignment(enrollment, course_assignment):
+    """Best-effort link back to a per-student Assignment for (enrollment,
+    course_assignment), so writes keep the legacy `assignment` FK populated for
+    existing students (teacher views still read it). None for late joiners."""
+    return (
+        Assignment.objects.filter(
+            enrollment=enrollment, activity_id=course_assignment.activity_id
+        )
+        .filter(
+            Q(piece_id=course_assignment.piece_id)
+            | Q(part__piece_id=course_assignment.piece_id)
+        )
+        .first()
+    )
 
 
 class SubmissionViewSet(
@@ -32,28 +71,39 @@ class SubmissionViewSet(
     serializer_class = SubmissionSerializer
     queryset = Submission.objects.all()
 
+    def _target(self):
+        # Resolve (course_assignment, enrollment) once per request from the URL
+        # CourseAssignment id, scoped to the requesting student.
+        if not hasattr(self, "_cached_target"):
+            self._cached_target = resolve_student_target(
+                self.request,
+                self.kwargs["course_slug_slug"],
+                self.kwargs["assignment_id"],
+            )
+        return self._cached_target
+
     def get_queryset(self):
-        return self.queryset.filter(assignment_id=self.kwargs["assignment_id"])
+        # Phase 2: a student's submissions are keyed by (course_assignment,
+        # enrollment), not the legacy per-student assignment id.
+        course_assignment, enrollment = self._target()
+        return self.queryset.filter(
+            course_assignment=course_assignment, enrollment=enrollment
+        )
 
     def perform_create(self, serializer):
-        # Phase 2 dual-populate: also record the course-level assignment, the
-        # student (enrollment), and the instrument/part the work was made with,
-        # all resolved from the per-student assignment.
-        assignment = Assignment.objects.select_related(
-            "enrollment", "instrument", "part__piece"
-        ).get(pk=self.kwargs["assignment_id"])
-        piece_id = assignment.piece_id or assignment.part.piece_id
-        course_assignment = CourseAssignment.objects.filter(
-            course_id=assignment.enrollment.course_id,
-            activity_id=assignment.activity_id,
-            piece_id=piece_id,
-        ).first()
+        # Phase 2: record the course-level assignment, the student (enrollment),
+        # and the instrument/part the work was made with, resolved from the
+        # enrollment at write time. The legacy `assignment` FK is still populated
+        # when an Assignment row exists (so teacher views keep working); it's null
+        # for late joiners.
+        course_assignment, enrollment = self._target()
+        assignment = resolve_legacy_assignment(enrollment, course_assignment)
         serializer.save(
             assignment=assignment,
             course_assignment=course_assignment,
-            enrollment=assignment.enrollment,
-            instrument=assignment.instrument,
-            part=assignment.part,
+            enrollment=enrollment,
+            instrument=resolve_instrument(enrollment),
+            part=Part.for_activity(course_assignment.activity, course_assignment.piece),
         )
 
     # @action(detail=False)
@@ -171,42 +221,36 @@ class ActivityProgressViewSet(GenericViewSet):
     serializer_class = ActivityProgressSerializer
     queryset = ActivityProgress.objects.all()
 
-    @staticmethod
-    def _phase2_defaults(assignment_id):
-        # Resolve course_assignment + enrollment from the per-student assignment so
-        # newly-created progress is dual-keyed during the Phase 2 transition.
-        assignment = (
-            Assignment.objects.select_related("enrollment", "part__piece")
-            .filter(pk=assignment_id)
-            .first()
-        )
-        if assignment is None:
-            return {}
-        piece_id = assignment.piece_id or assignment.part.piece_id
-        course_assignment = CourseAssignment.objects.filter(
-            course_id=assignment.enrollment.course_id,
-            activity_id=assignment.activity_id,
-            piece_id=piece_id,
-        ).first()
-        return {
-            "course_assignment": course_assignment,
-            "enrollment_id": assignment.enrollment_id,
-        }
+    def _target(self):
+        # Resolve (course_assignment, enrollment) once per request from the URL
+        # CourseAssignment id, scoped to the requesting student.
+        if not hasattr(self, "_cached_target"):
+            self._cached_target = resolve_student_target(
+                self.request,
+                self.kwargs["course_slug_slug"],
+                self.kwargs["assignment_id"],
+            )
+        return self._cached_target
 
-    def _get_or_create_progress(self, assignment_id, lock=False):
+    def _get_or_create_progress(self, lock=False):
+        # Phase 2: progress is keyed by (course_assignment, enrollment). The legacy
+        # `assignment` FK is populated when an Assignment row exists (back-compat),
+        # null for late joiners.
+        course_assignment, enrollment = self._target()
         manager = ActivityProgress.objects
         if lock:
             manager = manager.select_for_update()
         return manager.get_or_create(
-            assignment_id=assignment_id,
-            defaults=self._phase2_defaults(assignment_id),
+            course_assignment=course_assignment,
+            enrollment=enrollment,
+            defaults={
+                "assignment": resolve_legacy_assignment(enrollment, course_assignment)
+            },
         )
 
     def get_object(self):
         """Get or create progress for the current assignment."""
-        progress, created = self._get_or_create_progress(
-            self.kwargs.get("assignment_id")
-        )
+        progress, created = self._get_or_create_progress()
         return progress
 
     def list(self, request, *args, **kwargs):
@@ -218,14 +262,10 @@ class ActivityProgressViewSet(GenericViewSet):
     @action(detail=False, methods=["post"])
     def log_event(self, request, **kwargs):
         """Log an operation event to the activity progress."""
-        assignment_id = kwargs.get("assignment_id")
-
         try:
             # Use transaction with row-level locking to prevent race conditions
             with transaction.atomic():
-                progress, created = self._get_or_create_progress(
-                    assignment_id, lock=True
-                )
+                progress, created = self._get_or_create_progress(lock=True)
 
                 # Extract event data from request
                 operation = request.data.get("operation")
@@ -276,14 +316,11 @@ class ActivityProgressViewSet(GenericViewSet):
     @action(detail=False, methods=["post"])
     def submit_step(self, request, **kwargs):
         """Submit current step and advance to next."""
-        assignment_id = kwargs.get("assignment_id")
         submitted_step = request.data.get("step")
 
         try:
             with transaction.atomic():
-                progress, created = self._get_or_create_progress(
-                    assignment_id, lock=True
-                )
+                progress, created = self._get_or_create_progress(lock=True)
 
                 # If a step was submitted, use it as the step being completed
                 # This ensures the user's actual position is used, not stale DB state
@@ -330,10 +367,8 @@ class ActivityProgressViewSet(GenericViewSet):
     @action(detail=False, methods=["post"])
     def save_response(self, request, **kwargs):
         """Save a question response without advancing step."""
-        assignment_id = kwargs.get("assignment_id")
-
         try:
-            progress, created = self._get_or_create_progress(assignment_id)
+            progress, created = self._get_or_create_progress()
 
             question_id = request.data.get("question_id")
             response_text = request.data.get("response")
@@ -355,9 +390,7 @@ class ActivityProgressViewSet(GenericViewSet):
 
         try:
             with transaction.atomic():
-                progress, created = self._get_or_create_progress(
-                    assignment_id, lock=True
-                )
+                progress, created = self._get_or_create_progress(lock=True)
 
                 # Extract audio state from request
                 audio_url = request.data.get("audio_url")
