@@ -1,6 +1,11 @@
 from rest_framework import serializers
 
-from teleband.submissions.models import Grade, Submission, SubmissionAttachment, ActivityProgress
+from teleband.submissions.models import (
+    Grade,
+    Submission,
+    SubmissionAttachment,
+    ActivityProgress,
+)
 
 # from teleband.assignments.api.serializers import AssignmentSerializer
 

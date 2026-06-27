@@ -1,5 +1,6 @@
 from django.http import HttpResponse
 
+
 class AlbHealthcheckMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response

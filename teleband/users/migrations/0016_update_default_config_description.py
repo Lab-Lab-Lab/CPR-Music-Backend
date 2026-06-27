@@ -2,9 +2,14 @@
 
 from django.db import migrations
 
+
 def update_site_forward(apps, schema_editor):
-   instrument_config_model = apps.get_model("users", "InstrumentConfig")
-   instrument_config_model.objects.filter(name="Roland-GR-1-Trumpet", user=None).update(description="Default Roland GR-1 Trumpet configuration.")
+    instrument_config_model = apps.get_model("users", "InstrumentConfig")
+    instrument_config_model.objects.filter(
+        name="Roland-GR-1-Trumpet", user=None
+    ).update(description="Default Roland GR-1 Trumpet configuration.")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [

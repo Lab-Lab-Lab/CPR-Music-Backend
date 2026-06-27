@@ -206,7 +206,10 @@ class CourseViewSet(
                                 break
                         response["created"].append(
                             User.objects.create_user(
-                                name=name, username=new_username, password=password, grade=grade
+                                name=name,
+                                username=new_username,
+                                password=password,
+                                grade=grade,
                             )
                         )
                 except User.DoesNotExist:

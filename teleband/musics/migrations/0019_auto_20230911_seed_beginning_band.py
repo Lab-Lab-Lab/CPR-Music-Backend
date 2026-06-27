@@ -4,7 +4,6 @@ from django.db import migrations
 import json
 from teleband.utils.migration_helpers import create_part_et_al, create_piece_et_al
 
-
 data = [
     {
         "name": "Beginning Band - When the Saints Go Marching In",

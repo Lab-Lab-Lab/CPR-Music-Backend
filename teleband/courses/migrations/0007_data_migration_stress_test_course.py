@@ -59,7 +59,9 @@ def stress_test_course(apps, schema_editor):
 
     # Copy the "ALL Curriculum" to this course
     sixth_grade = Course.objects.get(slug="6th-grade-band")
-    source_curriculum = Curriculum.objects.get(name="ALL Curriculum", course=sixth_grade)
+    source_curriculum = Curriculum.objects.get(
+        name="ALL Curriculum", course=sixth_grade
+    )
     new_curriculum = Curriculum.objects.create(
         name="ALL Curriculum",
         ordered=source_curriculum.ordered,

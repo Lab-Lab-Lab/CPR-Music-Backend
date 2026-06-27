@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 piece_names = [
     "Air for Band",
     "Celebration for a New Day",
