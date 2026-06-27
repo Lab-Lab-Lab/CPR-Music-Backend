@@ -204,24 +204,47 @@ class CourseAssignmentReadSerializer(serializers.Serializer):
     student enrollment (passed in context as ``enrollment``). The ``id`` is the
     CourseAssignment id. Per-student data (instrument, part, submissions, group) is
     resolved at read time. A response-equivalence test pins that this matches the
-    legacy per-student serializer field-for-field except ``id``."""
+    legacy per-student serializer field-for-field except ``id``.
 
-    def to_representation(self, ca):
-        enrollment = self.context["enrollment"]
-        activity = ca.activity
-        instrument = resolve_instrument(enrollment)
-        part = Part.for_activity(activity, ca.piece)
-        submissions = (
+    For list rendering the view precomputes per-CA maps (``submissions_by_ca``,
+    ``group_by_ca``, ``part_for``) and passes them in context, so resolution is
+    O(1) per row instead of N+1. When those maps are absent (single-object use,
+    e.g. the equivalence test) it falls back to direct queries."""
+
+    def _submissions_for(self, ca, enrollment):
+        by_ca = self.context.get("submissions_by_ca")
+        if by_ca is not None:
+            return by_ca.get(ca.id, [])
+        return list(
             Submission.objects.filter(course_assignment=ca, enrollment=enrollment)
             .order_by("id")
             .prefetch_related("attachments")
         )
+
+    def _group_for(self, ca, enrollment):
+        by_ca = self.context.get("group_by_ca")
+        if by_ca is not None:
+            return by_ca.get(ca.id)
         group_assignment = (
             GroupAssignment.objects.select_related("group")
             .filter(course_assignment=ca, enrollment=enrollment)
             .first()
         )
-        group = group_assignment.group if group_assignment else None
+        return group_assignment.group if group_assignment else None
+
+    def _part_for(self, ca):
+        part_for = self.context.get("part_for")
+        if part_for is not None:
+            return part_for(ca.activity, ca.piece)
+        return Part.for_activity(ca.activity, ca.piece)
+
+    def to_representation(self, ca):
+        enrollment = self.context["enrollment"]
+        activity = ca.activity
+        instrument = resolve_instrument(enrollment)
+        part = self._part_for(ca)
+        submissions = self._submissions_for(ca, enrollment)
+        group = self._group_for(ca, enrollment)
         transposition = instrument.transposition if instrument else None
         return {
             "id": ca.id,

@@ -4,12 +4,13 @@ from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, UpdateModelMixin
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
 
 from .serializers import (
     AssignmentViewSetSerializer,
     AssignmentInstrumentSerializer,
     AssignmentSerializer,
+    CourseAssignmentReadSerializer,
 )
 from teleband.assignments.api.serializers import ActivitySerializer, PiecePlanSerializer
 from teleband.musics.api.serializers import PartTranspositionSerializer
@@ -18,10 +19,14 @@ from teleband.assignments.models import (
     Assignment,
     Activity,
     AssignmentGroup,
+    CourseAssignment,
+    GroupAssignment,
     PlannedActivity,
     PiecePlan,
 )
 from teleband.courses.models import Course
+from teleband.musics.models import Part
+from teleband.submissions.models import Submission
 from teleband.utils.permissions import IsTeacher
 
 
@@ -135,10 +140,139 @@ class AssignmentViewSet(
                 Assignment.objects.filter(enrollment__course__slug=slug)
             )
 
-    def list(self, request, *args, **kwargs):
-        # Annotate each assignment with its PlannedActivity.order via a correlated
-        # subquery instead of running a separate PlannedActivity query (with its
-        # Meta ordering join) and rebuilding the mapping in Python.
+    # Fallback ordering by activity type name prefix, used when an assignment has
+    # no PlannedActivity.order (shared by the student and teacher list paths).
+    _FALLBACK_ORDERING = {
+        "Melody": 1,
+        "Bassline": 2,
+        "Creativity": 3,
+        "Reflection": 4,
+        "Connect": 5,
+        "Aural": 3,
+        "Exploratory": 3,
+        "Theoretical": 3,
+        "MelodyPost": 3.1,
+        "BasslinePost": 3.2,
+    }
+
+    def _grouped_by_piece(self, serialized_items, plan_order_by_id):
+        # Group serialized rows by piece slug, then sort each group by the row's
+        # PlannedActivity.order (when present) else the activity-type fallback.
+        grouped = defaultdict(list)
+        for item in serialized_items:
+            grouped[item["piece_slug"]].append(item)
+
+        def sort_key(a):
+            plan_order = plan_order_by_id.get(a["id"])
+            if plan_order is not None:
+                return (0, plan_order)
+            return (
+                1,
+                self._FALLBACK_ORDERING.get(a["activity_type_name"].split()[0], 999),
+            )
+
+        for slug in grouped:
+            grouped[slug].sort(key=sort_key)
+        return grouped
+
+    def _student_list(self, request, enrollment):
+        # Phase 2 read path: resolve the student's assignments from CourseAssignment
+        # instead of per-student Assignment rows. A student sees every CourseAssignment
+        # for their course that is NOT scoped to a group, UNION the grouped ones
+        # (telephone_fixed) that name their enrollment. This also fixes late joiners:
+        # they get the course's CourseAssignments even with no Assignment rows.
+        grouped_ca_ids = GroupAssignment.objects.values("course_assignment_id")
+        my_ca_ids = GroupAssignment.objects.filter(enrollment=enrollment).values(
+            "course_assignment_id"
+        )
+        planned_order_subquery = PlannedActivity.objects.filter(
+            piece_plan_id=OuterRef("piece_plan_id"),
+            activity_id=OuterRef("activity_id"),
+        ).values("order")[:1]
+        course_assignments = (
+            CourseAssignment.objects.filter(course=enrollment.course)
+            .filter(~Q(id__in=grouped_ca_ids) | Q(id__in=my_ca_ids))
+            .select_related(
+                "activity",
+                "activity__part_type",
+                "activity__activity_type",
+                "activity__activity_type__category",
+                "piece",
+            )
+            .annotate(plan_order=Subquery(planned_order_subquery))
+        )
+        course_assignments = list(course_assignments)
+        context = {
+            "request": request,
+            "enrollment": enrollment,
+            **self._read_context(course_assignments, enrollment),
+        }
+        serialized = CourseAssignmentReadSerializer(
+            course_assignments, many=True, context=context
+        ).data
+        plan_order_by_id = {
+            ca.id: ca.plan_order for ca in course_assignments if ca.piece_plan_id
+        }
+        return Response(self._grouped_by_piece(serialized, plan_order_by_id))
+
+    def _read_context(self, course_assignments, enrollment):
+        # Precompute the per-CA maps CourseAssignmentReadSerializer needs so the
+        # list resolves part/submissions/group in O(1) per row instead of N+1
+        # (landmine: read-time per-(student x activity) resolution).
+        ca_ids = [ca.id for ca in course_assignments]
+        pieces = {ca.piece for ca in course_assignments}
+
+        # submissions for this student, grouped by CourseAssignment, attachments
+        # prefetched (matches the legacy per-assignment submissions list).
+        submissions_by_ca = defaultdict(list)
+        for sub in (
+            Submission.objects.filter(
+                course_assignment_id__in=ca_ids, enrollment=enrollment
+            )
+            .order_by("id")
+            .prefetch_related("attachments")
+        ):
+            submissions_by_ca[sub.course_assignment_id].append(sub)
+
+        # group (telephone_fixed) per CourseAssignment for this student.
+        group_by_ca = {
+            ga.course_assignment_id: ga.group
+            for ga in GroupAssignment.objects.filter(
+                course_assignment_id__in=ca_ids, enrollment=enrollment
+            ).select_related("group")
+        }
+
+        # part resolver: one Part query for every piece in play (with the tree
+        # PartSerializer walks), then resolve (activity, piece) -> Part in memory,
+        # mirroring Part.for_activity's part_type match with a Melody fallback.
+        parts = (
+            Part.objects.filter(piece__in=pieces)
+            .select_related("part_type", "piece", "piece__composer")
+            .prefetch_related("transpositions__transposition", "instrument_samples")
+        )
+        by_type = {}
+        melody_by_piece = {}
+        for part in parts:
+            by_type[(part.piece_id, part.part_type_id)] = part
+            if part.part_type.name == "Melody":
+                melody_by_piece[part.piece_id] = part
+
+        def part_for(activity, piece):
+            if activity.part_type_id is not None:
+                hit = by_type.get((piece.id, activity.part_type_id))
+                if hit is not None:
+                    return hit
+            return melody_by_piece.get(piece.id)
+
+        return {
+            "submissions_by_ca": submissions_by_ca,
+            "group_by_ca": group_by_ca,
+            "part_for": part_for,
+        }
+
+    def _teacher_list(self, request):
+        # Legacy per-student Assignment read path (unchanged); flipped to
+        # CourseAssignment in a later step alongside the teacher cardinality change.
         planned_order_subquery = PlannedActivity.objects.filter(
             piece_plan_id=OuterRef("piece_plan_id"),
             activity_id=OuterRef("activity_id"),
@@ -146,45 +280,19 @@ class AssignmentViewSet(
         assignments = self.get_queryset().annotate(
             plan_order=Subquery(planned_order_subquery)
         )
-
         serialized = AssignmentViewSetSerializer(
             assignments, context={"request": request}, many=True
+        ).data
+        plan_order_by_id = {a.id: a.plan_order for a in assignments if a.piece_plan_id}
+        return Response(self._grouped_by_piece(serialized, plan_order_by_id))
+
+    def list(self, request, *args, **kwargs):
+        enrollment = self.request.user.enrollment_set.select_related("role").get(
+            course__slug=self.kwargs["course_slug_slug"]
         )
-
-        grouped = defaultdict(list)
-        for assignment in serialized.data:
-            key = assignment["piece_slug"]
-            grouped[key].append(assignment)
-
-        # Map assignment id -> planned activity order (from the annotation).
-        assignment_plan_order = {
-            a.id: a.plan_order for a in assignments if a.piece_plan_id
-        }
-
-        # Fallback ordering by activity type name prefix
-        fallback_ordering = {
-            "Melody": 1,
-            "Bassline": 2,
-            "Creativity": 3,
-            "Reflection": 4,
-            "Connect": 5,
-            "Aural": 3,
-            "Exploratory": 3,
-            "Theoretical": 3,
-            "MelodyPost": 3.1,
-            "BasslinePost": 3.2,
-        }
-
-        def sort_key(a):
-            plan_order = assignment_plan_order.get(a["id"])
-            if plan_order is not None:
-                return (0, plan_order)
-            return (1, fallback_ordering.get(a["activity_type_name"].split()[0], 999))
-
-        for pieceplan in grouped:
-            grouped[pieceplan].sort(key=sort_key)
-
-        return Response(grouped)
+        if enrollment.role.name == "Student":
+            return self._student_list(request, enrollment)
+        return self._teacher_list(request)
 
 
 class PiecePlanViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):

@@ -12,6 +12,7 @@ from django.test.utils import CaptureQueriesContext
 from django.db import connection
 from rest_framework.test import APIClient
 
+from teleband.assignments.models import CourseAssignment
 from teleband.assignments.tests.factories import (
     ActivityFactory,
     AssignmentFactory,
@@ -107,14 +108,27 @@ class TestAssignmentListQueryCounts:
                 PartTransposition.objects.create(
                     part=part, transposition=InstrumentFactory().transposition
                 )
+                activity = ActivityFactory(part_type=part.part_type)
                 assignment = AssignmentFactory(
-                    activity=ActivityFactory(part_type=part.part_type),
+                    activity=activity,
                     enrollment=enrollment,
                     part=part,
                     instrument=enrollment.instrument,
                     piece=piece,
                 )
-                SubmissionFactory(assignment=assignment)
+                # Phase 2 student list reads from CourseAssignment; dual-write it
+                # (as the assign helpers do) plus a matching submission so this
+                # test actually exercises the flipped read path's scaling.
+                ca = CourseAssignment.objects.create(
+                    course=course, activity=activity, piece=piece
+                )
+                SubmissionFactory(
+                    assignment=assignment,
+                    course_assignment=ca,
+                    enrollment=enrollment,
+                    instrument=enrollment.instrument,
+                    part=part,
+                )
 
         add_assignments(2)
         few = _count_list_queries(course, student)
