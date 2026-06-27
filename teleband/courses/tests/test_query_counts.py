@@ -39,9 +39,9 @@ def test_roster_constant_in_member_count():
     small = _count(f"/api/courses/{small_course.slug}/roster/", small_teacher)
     large = _count(f"/api/courses/{large_course.slug}/roster/", large_teacher)
 
-    assert small == large, (
-        f"roster query count grows with #members ({small} vs {large}) -- N+1."
-    )
+    assert (
+        small == large
+    ), f"roster query count grows with #members ({small} vs {large}) -- N+1."
 
 
 def test_enrollment_list_constant_in_enrollment_count():

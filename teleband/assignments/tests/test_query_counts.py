@@ -98,9 +98,7 @@ class TestAssignmentListQueryCounts:
         teacher_role = RoleFactory(name="Teacher")
         EnrollmentFactory(user=UserFactory(), course=course, role=teacher_role)
         student = UserFactory()
-        enrollment = EnrollmentFactory(
-            user=student, course=course, role=student_role
-        )
+        enrollment = EnrollmentFactory(user=student, course=course, role=student_role)
         piece = PieceFactory()
 
         def add_assignments(n):
