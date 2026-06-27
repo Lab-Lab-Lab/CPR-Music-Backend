@@ -88,10 +88,40 @@ class TeacherSubmissionViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
             .values("pk")[:1]
         )
 
-        # Use the subquery to filter the main queryset
-        filtered_submissions = Submission.objects.filter(
-            pk__in=Subquery(latest_submissions)
-        ).order_by("assignment__enrollment", "-submitted")
+        # Use the subquery to filter the main queryset. The select_related/
+        # prefetch_related below cover every relation walked by
+        # TeacherSubmissionSerializer -> AssignmentSerializer ->
+        # EnrollmentSerializer (course/owner, instrument, part tree, activity
+        # tree) plus the grades and attachments, so serialization issues a
+        # constant number of queries regardless of how many students submitted.
+        filtered_submissions = (
+            Submission.objects.filter(pk__in=Subquery(latest_submissions))
+            .select_related(
+                "grade",
+                "self_grade",
+                "assignment__activity__activity_type__category",
+                "assignment__activity__part_type",
+                "assignment__instrument__transposition",
+                "assignment__part__part_type",
+                "assignment__part__piece__composer",
+                "assignment__piece",
+                "assignment__group",
+                "assignment__enrollment__user",
+                "assignment__enrollment__instrument__transposition",
+                "assignment__enrollment__role",
+                "assignment__enrollment__course__owner",
+            )
+            .prefetch_related(
+                "attachments",
+                "assignment__submissions",
+                "assignment__submissions__attachments",
+                "assignment__part__transpositions__transposition",
+                "assignment__part__instrument_samples",
+                "assignment__enrollment__user__groups",
+                "assignment__enrollment__course__owner__groups",
+            )
+            .order_by("assignment__enrollment", "-submitted")
+        )
 
         # The final queryset will have the latest submissions for each enrollment
         submissions = filtered_submissions
