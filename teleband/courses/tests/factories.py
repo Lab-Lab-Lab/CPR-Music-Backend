@@ -12,8 +12,10 @@ class CourseFactory(DjangoModelFactory):
 
     name = Faker("color")
     owner = SubFactory(UserFactory)
-    start_date = LazyFunction(datetime.datetime.utcnow)
-    end_date = LazyFunction(datetime.datetime.utcnow)
+    # Course.start_date/end_date are DateFields; use dates (utcnow() is a datetime,
+    # which Postgres truncates on write but SQLite keeps, tripping DRF's DateField).
+    start_date = LazyFunction(lambda: datetime.datetime.utcnow().date())
+    end_date = LazyFunction(lambda: datetime.datetime.utcnow().date())
 
     class Meta:
         model = Course
