@@ -472,9 +472,9 @@ class CourseViewSet(
         instrument = Instrument.objects.get(pk=instrument_id)
         piece = Piece.objects.get(pk=piece_id)
 
-        assignments = Assignment.objects.filter(piece=piece, enrollment__course=course)
-        for assignment in assignments:
-            assignment.instrument = instrument
-            assignment.save()
+        # One UPDATE for the whole piece instead of a save() per assignment.
+        Assignment.objects.filter(piece=piece, enrollment__course=course).update(
+            instrument=instrument
+        )
 
         return Response(status=status.HTTP_200_OK)
