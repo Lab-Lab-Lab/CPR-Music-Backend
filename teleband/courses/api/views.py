@@ -220,21 +220,28 @@ class CourseViewSet(
             role = Role.objects.get(name="Student")
             enrollments = collections.defaultdict(list)
 
-            for key in ["created", "existing"]:
-                for user in response[key]:
-                    try:
-                        enrollments["existing"].append(
-                            Enrollment.objects.get(user=user, course=course)
+            # Resolve existing enrollments in one query, then bulk_create the new
+            # ones instead of a get()+create() per user.
+            all_users = response["created"] + response["existing"]
+            existing_by_user = {
+                e.user_id: e
+                for e in Enrollment.objects.filter(course=course, user__in=all_users)
+            }
+            to_create = []
+            for user in all_users:
+                existing = existing_by_user.get(user.id)
+                if existing is not None:
+                    enrollments["existing"].append(existing)
+                else:
+                    to_create.append(
+                        Enrollment(
+                            user=user,
+                            course=course,
+                            instrument=user.instrument,
+                            role=role,
                         )
-                    except Enrollment.DoesNotExist:
-                        enrollments["created"].append(
-                            Enrollment.objects.create(
-                                user=user,
-                                course=course,
-                                instrument=user.instrument,
-                                role=role,
-                            )
-                        )
+                    )
+            enrollments["created"] = Enrollment.objects.bulk_create(to_create)
 
             response["created"] = UserSerializer(
                 response["created"], many=True, context={"request": request}
