@@ -14,22 +14,33 @@ from django.http import HttpResponse
 
 class AssignmentListView(UserPassesTestMixin, generic.ListView):
     model = Assignment
+    paginate_by = 100
 
     def get_queryset(self) -> QuerySet[Any]:
-        results = Assignment.objects.prefetch_related(
-            "piece",
-            "piece_plan",
-            "enrollment",
-            "enrollment__user",
-            "enrollment__course",
-            "enrollment__instrument",
-            "enrollment__course__owner",
-            "instrument",
-            "submissions__attachments",
-            "submissions__grade",
-            "submissions__self_grade",
-            "activity",
-        ).all()
+        # Forward FKs belong in select_related (one JOIN); only the reverse
+        # submissions relation needs prefetch_related.
+        results = (
+            Assignment.objects.select_related(
+                "piece",
+                "piece_plan",
+                "piece_plan__piece",
+                "enrollment",
+                "enrollment__user",
+                "enrollment__course",
+                "enrollment__instrument",
+                "enrollment__course__owner",
+                "instrument",
+                "activity",
+                "activity__activity_type",
+                "activity__part_type",
+            )
+            .prefetch_related(
+                "submissions__attachments",
+                "submissions__grade",
+                "submissions__self_grade",
+            )
+            .all()
+        )
         return results
 
     # queryset = Course.objects.prefetch_related(
@@ -52,17 +63,32 @@ def csv_view(request):
     # select related returns a queryset that will follow foreign-key relationships. This
     # is a performance booster which results in a single more complex query but won't require
     # database queries
-    assignments = Assignment.objects.select_related(
-        "piece",
-        "piece_plan",
-        "enrollment",
-        "enrollment__user",
-        "enrollment__course",
-        "enrollment__instrument",
-        "enrollment__course__owner",
-        "instrument",
-        "activity",
-    ).all()
+    assignments = (
+        Assignment.objects.select_related(
+            "piece",
+            "piece_plan",
+            "piece_plan__piece",
+            "enrollment",
+            "enrollment__user",
+            "enrollment__course",
+            "enrollment__instrument",
+            "enrollment__course__owner",
+            "instrument",
+            "activity",
+            # Activity.__str__ / PiecePlan.__str__ walk these; the CSV writes the
+            # str() of activity and piece_plan, so cover them too.
+            "activity__activity_type",
+            "activity__part_type",
+        )
+        .prefetch_related(
+            # Reverse relations iterated in the row loop below -- without these
+            # each assignment re-queried its submissions/attachments/grades.
+            "submissions__attachments",
+            "submissions__grade",
+            "submissions__self_grade",
+        )
+        .all()
+    )
 
     # Create the HttpResponse object with the appropriate CSV header
     response = HttpResponse(
@@ -107,8 +133,8 @@ def csv_view(request):
                     assn.enrollment.course.name,
                     assn.piece.id,
                     assn.piece.name,
-                    assn.piece_plan.id,
-                    assn.piece_plan,
+                    assn.piece_plan.id if assn.piece_plan else "N/A",
+                    assn.piece_plan or "N/A",
                     assn.enrollment.user.id,
                     assn.enrollment.instrument.id,
                     assn.enrollment.instrument.name,
@@ -135,8 +161,8 @@ def csv_view(request):
                         assn.enrollment.course.name,
                         assn.piece.id,
                         assn.piece.name,
-                        assn.piece_plan.id,
-                        assn.piece_plan,
+                        assn.piece_plan.id if assn.piece_plan else "N/A",
+                        assn.piece_plan or "N/A",
                         assn.enrollment.user.id,
                         assn.enrollment.instrument.id,
                         assn.enrollment.instrument.name,
