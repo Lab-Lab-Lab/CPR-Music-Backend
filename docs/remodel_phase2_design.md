@@ -149,13 +149,38 @@ This mirrors the phased discipline that worked for Phase 1.
    (nullable), dual-populate on create, backfill from existing `Submission.assignment`.
 6. ✅ **Re-key `ActivityProgress`** (done) — add `course_assignment` + `enrollment` (unique together),
    backfill from `assignment`, keep `get_or_create` on first access.
-7. ⬜ **Flip the read path** — `AssignmentViewSet` (student + teacher), submissions, and
-   activity-progress endpoints resolve from `CourseAssignment`, computing `part`/`instrument`
-   per enrollment at read time and scoping nested routes by `request.user`. Response shape
-   preserved (id = `course_assignment.id`). THE contract-sensitive step; gate with
-   response-equivalence snapshots.
-8. ⬜ **Contract & drop** — once reads use `CourseAssignment`, stop writing `Assignment`,
-   then drop `Submission.assignment` / `ActivityProgress.assignment` / the `Assignment` model.
+7. 🔶 **Flip the read path** — IN PROGRESS. **Student path DONE** on `backend-remodel-phase1`:
+   - `AssignmentViewSet.list` (student) resolves from `CourseAssignment` (id = `course_assignment.id`),
+     precomputing per-CA part/submissions/group maps so it stays O(1) in assignment count; fixes
+     late joiners and scopes telephone groups by enrollment.
+   - `AssignmentViewSet.retrieve` (student) → `CourseAssignmentRetrieveSerializer` (legacy
+     `AssignmentSerializer` shape).
+   - Nested `submissions` + `activity-progress` routes reinterpret `{id}` as a `CourseAssignment`
+     id, scope by the requesting student's enrollment, key writes by `(course_assignment, enrollment)`,
+     404 on a foreign id. Late joiners can now submit/track progress (the `assignment` FK is now
+     nullable — migration 0018 — and populated only when an Assignment row exists, so teacher views
+     keep reading it).
+   - Foundations: response-equivalence serializers + tests (`CourseAssignmentReadSerializer`,
+     `CourseAssignmentRetrieveSerializer`) pin field-for-field parity except `id`; query-count test
+     updated to dual-write CAs; factory fixes (unique `UserFactory.username`, date-typed
+     `CourseFactory` dates).
+   - **REMAINING (teacher):** `AssignmentViewSet.list`/`retrieve` for teachers still read per-student
+     `Assignment` (coherent — teachers get Assignment ids and use them consistently;
+     `TeacherSubmissionViewSet.recent` reads the still-populated `assignment` FK). Flipping the teacher
+     path is a **cardinality change** (per-student rows → per-CA rows) — needs a contract decision on
+     the teacher list shape before building.
+8. ⬜ **Contract & drop** — once reads (incl. teacher) use `CourseAssignment`, stop writing
+   `Assignment`, then drop `Submission.assignment` / `ActivityProgress.assignment` / the `Assignment`
+   model, and add the `unique(course_assignment, enrollment)` constraints to Submission/ActivityProgress.
+
+### Frontend contract surface (verified against `~/GithubOrgs/espadonne/CPR-Music`)
+
+Per-assignment `id` from the list is consumed by exactly: `GET /assignments/{id}/` (retrieve),
+`GET|POST /assignments/{id}/submissions/`, `POST .../submissions/{sid}/attachments/` (keyed by
+submission pk, unaffected), and `*/activity-progress/{,log_event,submit_step,save_response,save_audio_state}`.
+**There is no per-assignment `PATCH`** — instrument changes go through course-level
+`PATCH /courses/{slug}/change_piece_instrument/` (by `piece_id`), which still updates `Assignment`
+rows during the transition. So the student contract surface flipped in step 7 is complete.
 
 Each step is independently shippable with query-count + response-equivalence tests, same as Phase 1.
 Steps 7–8 are the contract-sensitive half — review the dual-write foundation (PR #56) first.
