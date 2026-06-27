@@ -141,12 +141,12 @@ This mirrors the phased discipline that worked for Phase 1.
 3. ✅ **Dual-write from `assign_*`** (done) — `assign_one_piece_activity` /
    `assign_telephone_fixed` now also create `CourseAssignment` (and `GroupAssignment` per
    telephone member). Per-student `Assignment` rows still written; old read path unaffected.
-4. ⬜ **Backfill data migration** — create `CourseAssignment` (and `GroupAssignment` for
+4. ✅ **Backfill data migration** (done) — create `CourseAssignment` (and `GroupAssignment` for
    telephone groups) from existing `Assignment` rows, collapsing by `(course, activity, piece)`.
    Handle legacy `piece IS NULL` rows first.
-5. ⬜ **Add Submission fields** — `course_assignment`, `enrollment`, `instrument`, `part`
+5. ✅ **Add Submission fields** (done) — `course_assignment`, `enrollment`, `instrument`, `part`
    (nullable), dual-populate on create, backfill from existing `Submission.assignment`.
-6. ⬜ **Re-key `ActivityProgress`** — add `course_assignment` + `enrollment` (unique together),
+6. ✅ **Re-key `ActivityProgress`** (done) — add `course_assignment` + `enrollment` (unique together),
    backfill from `assignment`, keep `get_or_create` on first access.
 7. ⬜ **Flip the read path** — `AssignmentViewSet` (student + teacher), submissions, and
    activity-progress endpoints resolve from `CourseAssignment`, computing `part`/`instrument`
