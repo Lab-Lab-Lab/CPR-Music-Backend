@@ -1,0 +1,123 @@
+# Phase 2 Design Scoping — Course-Level Assignments
+
+> Builds on the advisor's plan ([`remodel_assignments.md`](./remodel_assignments.md)) and
+> [`remodel_campaign.md`](./remodel_campaign.md). Phase 1 (1a/1b/1c) is shipped on
+> `backend-remodel-phase1` (PR #56). This document scopes the structural remodel; it is a
+> design to review and decide on, **not yet implemented**.
+
+## Reframing: what Phase 1b already fixed
+
+The advisor's plan targets the per-student assignment row explosion. **Phase 1b already
+removed the per-operation query cost**: `assign_*` now `bulk_create`s, so assigning a piece
+is O(A) queries regardless of roster size (was 2·A·S). So Phase 2 is no longer about
+*query expense per assign*. Its remaining, real motivations are:
+
+1. **Row count / storage** — still A·S rows in the DB (now written efficiently, but stored).
+2. **Late joiners** — a student who enrolls after a piece is assigned gets no assignments,
+   and there's no UI/endpoint to assign to them. (Correctness gap, not perf.)
+3. **Model cleanliness** — `instrument`/`part` are per-student data denormalized onto a row
+   that's conceptually "what the course is assigned"; `piece` is redundant with `part.piece`.
+
+This reframing matters for prioritization: Phase 2 is a **correctness + modeling** project
+now, not a perf emergency. It can be sequenced deliberately.
+
+## The hinge: the frontend uses a per-student `assignmentId`
+
+`~/GithubOrgs/espadonne/CPR-Music` (`actions.js`, `api.js`) uses an assignment `id` in:
+
+- `GET/POST /api/courses/{slug}/assignments/{id}/submissions/`
+- `POST  .../submissions/{submissionId}/attachments/`
+- `PATCH /api/courses/{slug}/assignments/{id}/` (instrument override)
+- `GET/POST /api/courses/{slug}/assignments/{id}/activity-progress/{,log_event,submit_step,save_response,save_audio_state}`
+
+The `id` comes from each object in the grouped list response. **Any design must keep a stable
+id the student can use for these nested routes**, with the decision to preserve the API shape
+(frontend untouched).
+
+## Two viable designs
+
+### Option A — Lazy per-student materialization (lower risk)
+- `CourseAssignment` becomes the template: one row per `(course, activity, piece)`, created by
+  `assign_*` (A rows, not A·S).
+- A per-student `Assignment` row is created **on demand** the first time a student accesses
+  their assignments (or submits). Its `id` is the same shape as today → **frontend unchanged,
+  every nested route keeps working unmodified**.
+- Late joiners: their `Assignment` rows materialize on first access → solved.
+- Row count: only materializes for students who actually engage; un-accessed assignments cost 0.
+- `instrument`/`part` can stay on `Assignment` (resolved at materialization), or move to
+  `Submission` later. Smallest blast radius.
+- **Trade-off:** keeps the per-student `Assignment` table (just sparse/lazy), so it's a partial
+  realization of the advisor's model. But it's incrementally shippable and contract-safe.
+
+### Option B — Fully dynamic (advisor's model)
+- `CourseAssignment` is the only "assignment" row. The list endpoint returns
+  CourseAssignment-derived objects with `id = course_assignment.id`, resolving `part`/`instrument`
+  per student at read time.
+- Nested routes reinterpret `{id}` as a `CourseAssignment` id and **scope by the requesting
+  student's enrollment** (`request.user`): submissions/activity-progress are keyed by
+  `(course_assignment, enrollment)`. The frontend is unchanged because each student only ever
+  uses ids from its own list response, and the backend scopes by the authenticated user.
+- `instrument`/`part` move to `Submission`; `ActivityProgress` re-keys to
+  `(course_assignment, enrollment)`.
+- **Trade-off:** matches the advisor's clean model and fully kills per-student rows, but changes
+  more semantics (teacher list shape, activity-progress identity, submission resolution) and has
+  the larger migration. Higher risk.
+
+**Recommendation:** **Option A first** (contract-safe, incrementally shippable, solves late
+joiners and row count), with Option B as a later step if the fully-dynamic model is desired.
+This mirrors the phased discipline that worked for Phase 1.
+
+## Migration landmines (must be in the plan)
+
+1. **Migration 0033 calls live helper code.** `assignments/0033_auto_20240312.add_demos` invokes
+   the live `assign_piece_plan`. If Phase 2 changes that helper's behavior/signature, a fresh
+   `migrate` runs the NEW logic against the OLD schema → breaks (we already hit a variant of this
+   in 1b). **Neutralize 0033 first**: freeze its behavior (inline the historical logic or guard
+   the helper), so changing the helper can't rewrite history. Prerequisite for any Phase 2 helper
+   change.
+2. **`ActivityProgress` is `OneToOne(Assignment)` with per-student research data**
+   (`audio_edit_history`, `question_responses`, `participant_email`). It cannot map onto a
+   course-level row. Must become `(course_assignment, enrollment)` (Option B) or stay attached to
+   the lazily-materialized `Assignment` (Option A). A wrong `on_delete` here destroys research data.
+3. **`Submission.assignment` is `PROTECT`.** Can't drop old `Assignment` rows while Submissions
+   reference them. Add new FK → backfill → swap → drop, in that order.
+4. **Legacy `Assignment.piece IS NULL` rows** (piece nullable since migration 0026, never
+   backfilled). They violate any tightened `(course, activity, piece)` uniqueness and abort the
+   data migration. Audit + backfill/dedupe first.
+5. **`Part.for_activity` read-time regression (Option B).** Moving part resolution to read time
+   makes it per-(student×activity). Precompute a per-request `(piece, activity)→part` map; the 1c
+   `.exists()` removal helped but isn't enough at read scale.
+6. **Non-unique `Course.slug`/`Piece.slug`** — `.get(slug=)` can 500. Dedupe + add `unique=True`
+   (slug values unchanged → no API break). Cheap; fold in.
+7. **`Activity.activity_type_name`/`category` denorm columns** already drifted (migration 0037).
+   Drop and repoint serializer `source` to the FK (`select_related`) — JSON field names unchanged.
+
+## Proposed sequence (Option A)
+
+1. **Neutralize migration 0033** (freeze its assign behavior). Verify fresh `migrate` is green.
+   Land as its own commit/PR — it's a safety prerequisite independent of the rest.
+2. Add `CourseAssignment` model + unique `(course, activity, piece)`; no behavior change yet.
+3. Rewrite `assign_*` to create/update `CourseAssignment` (A rows). Keep creating `Assignment`
+   rows too (dual-write) so nothing breaks, OR switch to lazy materialization behind a read path.
+4. Add lazy materialization on the student read path: `AssignmentViewSet.get_queryset` ensures a
+   student's `Assignment` rows exist for every `CourseAssignment` in their course (bulk, idempotent).
+   Late joiners now resolved.
+5. Data migration: create `CourseAssignment` rows by collapsing existing `Assignment` rows
+   (group by course, activity, piece); handle legacy null-piece rows.
+6. (Optional, later → Option B) move `instrument`/`part` to `Submission`, re-key `ActivityProgress`,
+   make the list fully dynamic, drop per-student `Assignment`.
+
+Each step is independently shippable with query-count + response-equivalence tests, same as Phase 1.
+
+## Open questions (decisions needed before building)
+
+1. **Option A vs B** — start with lazy materialization (recommended) or go straight to the fully
+   dynamic model?
+2. **Instrument source of truth** — when `Enrollment.instrument` ≠ `User.instrument`, which wins?
+   (Current fallback prefers `Enrollment.instrument`.)
+3. **`telephone_fixed`** — inherently per-student group assignment; keep a lightweight per-student
+   construct, or redesign grouping? (Advisor's own open question.)
+4. **Lazy materialization trigger (Option A)** — materialize on list access, or only on first
+   submit? Affects whether "assigned but not started" is queryable.
+5. **Scope of this effort** — is Phase 2 in scope for the current sprint, or is shipping Phase 1
+   (PR #56) + the migration-0033 safety fix the right stopping point for now?
