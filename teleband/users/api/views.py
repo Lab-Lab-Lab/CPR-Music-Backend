@@ -62,14 +62,17 @@ class UserViewSet(RetrieveModelMixin, ListModelMixin, UpdateModelMixin, GenericV
 
     def get_queryset(self, *args, **kwargs):
         if self.action in ["update", "partial_update"]:
-            return self.queryset.filter(
-                enrollment__course__in=[
-                    e.course
-                    for e in Enrollment.objects.filter(
-                        user__username="admin", role__name="Teacher"
-                    )
-                ]
+            # Users enrolled in a course taught by the requesting teacher. The
+            # previous implementation hardcoded user__username="admin" (a bug --
+            # it scoped to the literal "admin" user's courses, not the requester)
+            # and materialized the course list with a per-row Python loop.
+            teacher_course_ids = Course.objects.filter(
+                enrollment__user=self.request.user,
+                enrollment__role__name="Teacher",
             )
+            return self.queryset.filter(
+                enrollment__course__in=teacher_course_ids
+            ).distinct()
         assert isinstance(self.request.user.id, int)
         return self.queryset.filter(id=self.request.user.id)
 
