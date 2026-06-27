@@ -5,6 +5,20 @@
 > `backend-remodel-phase1` (PR #56). This document scopes the structural remodel; it is a
 > design to review and decide on, **not yet implemented**.
 
+## Decisions locked (2026-06-27)
+
+- **Design: Option B (fully dynamic).** `CourseAssignment` is the only assignment row;
+  the list `id` becomes the `CourseAssignment` id; nested submission/activity-progress
+  routes scope by the requesting student's enrollment; `instrument`/`part` move to
+  `Submission`; `ActivityProgress` re-keys to `(course_assignment, enrollment)`. API
+  response shape preserved so the frontend is untouched.
+- **Session scope: prerequisite only.** Land the migration-0033 safety fix (done — see
+  sequence step 1), then pause for review of PR #56 before building the remodel.
+
+**Status of prerequisite (step 1): ✅ DONE** — `assignments/0033` no longer calls live
+helper/model code (`add_demos` is a documented no-op). Fresh `migrate` is now robust to
+the upcoming helper/model changes.
+
 ## Reframing: what Phase 1b already fixed
 
 The advisor's plan targets the per-student assignment row explosion. **Phase 1b already
@@ -94,8 +108,7 @@ This mirrors the phased discipline that worked for Phase 1.
 
 ## Proposed sequence (Option A)
 
-1. **Neutralize migration 0033** (freeze its assign behavior). Verify fresh `migrate` is green.
-   Land as its own commit/PR — it's a safety prerequisite independent of the rest.
+1. ✅ **Neutralize migration 0033** (done) — `add_demos` is a no-op; fresh `migrate` green.
 2. Add `CourseAssignment` model + unique `(course, activity, piece)`; no behavior change yet.
 3. Rewrite `assign_*` to create/update `CourseAssignment` (A rows). Keep creating `Assignment`
    rows too (dual-write) so nothing breaks, OR switch to lazy materialization behind a read path.
