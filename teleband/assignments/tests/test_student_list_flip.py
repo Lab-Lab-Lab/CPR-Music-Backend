@@ -68,6 +68,33 @@ def test_student_list_returns_course_assignment_ids_grouped_by_piece():
     assert grouped[piece1.slug][0]["piece_id"] == piece1.id
 
 
+def test_student_retrieve_resolves_course_assignment_by_id():
+    course = CourseFactory()
+    student = _student(course)
+    ca, piece = _ca_with_assignment(course, student)
+
+    client = APIClient()
+    client.force_authenticate(user=student.user)
+    resp = client.get(f"/api/courses/{course.slug}/assignments/{ca.id}/")
+    assert resp.status_code == 200, resp.content
+    body = resp.json()
+    assert body["id"] == ca.id
+    assert body["enrollment"]["id"] == student.id
+
+
+def test_late_joiner_can_retrieve_course_assignment():
+    course = CourseFactory()
+    early = _student(course)
+    ca, piece = _ca_with_assignment(course, early)
+    late = _student(course)
+
+    client = APIClient()
+    client.force_authenticate(user=late.user)
+    resp = client.get(f"/api/courses/{course.slug}/assignments/{ca.id}/")
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["id"] == ca.id
+
+
 def test_late_joiner_sees_course_assignments_without_assignment_rows():
     course = CourseFactory()
     early = _student(course)

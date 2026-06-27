@@ -6,11 +6,14 @@ from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from django.db.models import OuterRef, Q, Subquery
 
+from django.shortcuts import get_object_or_404
+
 from .serializers import (
     AssignmentViewSetSerializer,
     AssignmentInstrumentSerializer,
     AssignmentSerializer,
     CourseAssignmentReadSerializer,
+    CourseAssignmentRetrieveSerializer,
 )
 from teleband.assignments.api.serializers import ActivitySerializer, PiecePlanSerializer
 from teleband.musics.api.serializers import PartTranspositionSerializer
@@ -78,6 +81,35 @@ class AssignmentViewSet(
         elif self.action == "retrieve":
             return AssignmentSerializer
         return self.serializer_class
+
+    def _student_enrollment(self):
+        return self.request.user.enrollment_set.select_related("role", "course").get(
+            course__slug=self.kwargs["course_slug_slug"]
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        # Phase 2: a student's single-assignment id is a CourseAssignment id;
+        # resolve it against their enrollment and return the legacy AssignmentSerializer
+        # shape. Teachers keep the per-student Assignment retrieve.
+        enrollment = self._student_enrollment()
+        if enrollment.role.name == "Student":
+            course_assignment = get_object_or_404(
+                CourseAssignment.objects.select_related(
+                    "activity",
+                    "activity__part_type",
+                    "activity__activity_type",
+                    "activity__activity_type__category",
+                    "piece",
+                ),
+                pk=self.kwargs["id"],
+                course=enrollment.course,
+            )
+            serializer = CourseAssignmentRetrieveSerializer(
+                course_assignment,
+                context={"request": request, "enrollment": enrollment},
+            )
+            return Response(serializer.data)
+        return super().retrieve(request, *args, **kwargs)
 
     @action(detail=True)
     def notation(self, request, *args, **kwargs):

@@ -238,6 +238,22 @@ class CourseAssignmentReadSerializer(serializers.Serializer):
             return part_for(ca.activity, ca.piece)
         return Part.for_activity(ca.activity, ca.piece)
 
+    @staticmethod
+    def submissions_for(ca, enrollment):
+        return list(
+            Submission.objects.filter(course_assignment=ca, enrollment=enrollment)
+            .order_by("id")
+            .prefetch_related("attachments")
+        )
+
+    @staticmethod
+    def group_assignment_for(ca, enrollment):
+        return (
+            GroupAssignment.objects.select_related("group")
+            .filter(course_assignment=ca, enrollment=enrollment)
+            .first()
+        )
+
     def to_representation(self, ca):
         enrollment = self.context["enrollment"]
         activity = ca.activity
@@ -265,4 +281,41 @@ class CourseAssignmentReadSerializer(serializers.Serializer):
             "submissions": SubmissionSerializer(
                 submissions, many=True, context=self.context
             ).data,
+        }
+
+
+class CourseAssignmentRetrieveSerializer(serializers.Serializer):
+    """Phase 2 single-assignment (retrieve) read path: produces the SAME shape as
+    the legacy AssignmentSerializer, resolved from a CourseAssignment against the
+    requesting student's enrollment (context ``enrollment``). The ``id`` is the
+    CourseAssignment id; a response-equivalence test pins field-for-field parity
+    except ``id``."""
+
+    def to_representation(self, ca):
+        enrollment = self.context["enrollment"]
+        instrument = resolve_instrument(enrollment)
+        part = Part.for_activity(ca.activity, ca.piece)
+        submissions = CourseAssignmentReadSerializer.submissions_for(ca, enrollment)
+        group_assignment = CourseAssignmentReadSerializer.group_assignment_for(
+            ca, enrollment
+        )
+        return {
+            "activity": ActivitySerializer(ca.activity, context=self.context).data,
+            "deadline": (
+                serializers.DateField().to_representation(ca.deadline)
+                if ca.deadline
+                else None
+            ),
+            "instrument": (
+                InstrumentSerializer(instrument, context=self.context).data
+                if instrument
+                else None
+            ),
+            "part": PartSerializer(part, context=self.context).data,
+            "id": ca.id,
+            "enrollment": EnrollmentSerializer(enrollment, context=self.context).data,
+            "submissions": SubmissionSerializer(
+                submissions, many=True, context=self.context
+            ).data,
+            "group": group_assignment.group_id if group_assignment else None,
         }

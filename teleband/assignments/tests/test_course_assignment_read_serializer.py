@@ -12,8 +12,10 @@ import pytest
 from rest_framework.test import APIRequestFactory
 
 from teleband.assignments.api.serializers import (
+    AssignmentSerializer,
     AssignmentViewSetSerializer,
     CourseAssignmentReadSerializer,
+    CourseAssignmentRetrieveSerializer,
 )
 from teleband.assignments.models import CourseAssignment
 from teleband.assignments.tests.factories import ActivityFactory, AssignmentFactory
@@ -87,6 +89,30 @@ def test_read_serializer_matches_legacy_with_submission():
 
     assert len(new["submissions"]) == 1
     assert legacy["submissions"] == new["submissions"]
+    assert {k: v for k, v in legacy.items() if k != "id"} == {
+        k: v for k, v in new.items() if k != "id"
+    }
+
+
+def test_retrieve_serializer_matches_legacy_except_id():
+    _, _, part, _, enrollment, assignment, ca = _setup()
+    SubmissionFactory(
+        assignment=assignment,
+        course_assignment=ca,
+        enrollment=enrollment,
+        instrument=enrollment.instrument,
+        part=part,
+        content="x",
+    )
+    request = _request()
+
+    legacy = AssignmentSerializer(assignment, context={"request": request}).data
+    new = CourseAssignmentRetrieveSerializer(
+        ca, context={"request": request, "enrollment": enrollment}
+    ).data
+
+    assert legacy["id"] == assignment.id
+    assert new["id"] == ca.id
     assert {k: v for k, v in legacy.items() if k != "id"} == {
         k: v for k, v in new.items() if k != "id"
     }
