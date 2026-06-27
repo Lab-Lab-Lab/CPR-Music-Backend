@@ -20,6 +20,30 @@ def _count(url, user):
     return len(ctx.captured_queries)
 
 
+def test_roster_constant_in_member_count():
+    """CourseViewSet.roster GET must not grow per enrolled member."""
+    teacher_role = RoleFactory(name="Teacher")
+    student_role = RoleFactory(name="Student")
+
+    def build(num_students):
+        course = CourseFactory()
+        teacher = UserFactory()
+        EnrollmentFactory(user=teacher, course=course, role=teacher_role)
+        for _ in range(num_students):
+            EnrollmentFactory(course=course, role=student_role)
+        return course, teacher
+
+    small_course, small_teacher = build(2)
+    large_course, large_teacher = build(20)
+
+    small = _count(f"/api/courses/{small_course.slug}/roster/", small_teacher)
+    large = _count(f"/api/courses/{large_course.slug}/roster/", large_teacher)
+
+    assert small == large, (
+        f"roster query count grows with #members ({small} vs {large}) -- N+1."
+    )
+
+
 def test_enrollment_list_constant_in_enrollment_count():
     """EnrollmentViewSet.list must not grow per enrollment of the user."""
     role = RoleFactory(name="Student")

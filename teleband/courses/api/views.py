@@ -253,8 +253,14 @@ class CourseViewSet(
                 data={"users": response, "enrollments": enrollments},
             )
 
-        # must be a GET, respond with all enrollments for this class
-        course_enrollments = Enrollment.objects.filter(course=self.get_object())
+        # must be a GET, respond with all enrollments for this class.
+        # RosterSerializer walks user (-> groups), instrument -> transposition,
+        # and role, so pull them in one shot.
+        course_enrollments = (
+            Enrollment.objects.filter(course=self.get_object())
+            .select_related("user", "instrument__transposition", "role")
+            .prefetch_related("user__groups")
+        )
         serializer = RosterSerializer(
             course_enrollments, many=True, context={"request": request}
         )
