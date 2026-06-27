@@ -122,10 +122,10 @@ response-equivalence snapshot of every touched endpoint *before* editing.
   `save()` loop with
   `Assignment.objects.filter(piece=piece, enrollment__course=course)
   .update(instrument=instrument)` → 1 UPDATE.
-- [ ] **#18 `assign_telephone_fixed`** (`courses/helper.py:67-114`) — hoist
+- [x] **#18 `assign_telephone_fixed`** (`courses/helper.py:67-114`) — hoist
   `Part.for_activity` into an activity-keyed dict (A lookups); build objects in
   memory, `bulk_create` after creating groups.
-- [ ] **#19 roster POST** (`courses/api/views.py:174-229`) — `filter(username__in=…)`
+- [x] **#19 roster POST** (`courses/api/views.py:174-229`) — `filter(username__in=…)`
   for existence; `Enrollment.objects.bulk_create(ignore_conflicts=True)` after one
   `filter(user__in=…)` prefetch; resolve collisions in memory; wrap in transaction.
   (`create_user` can't bulk — password hashing.)
@@ -136,7 +136,7 @@ response-equivalence snapshot of every touched endpoint *before* editing.
 
 ### 1c — Cheap cleanups
 
-- [ ] **#21** `courses/helper.py:68,100` — hoist
+- [x] **#21** `courses/helper.py:68,100` — hoist
   `activities = list(piece_plan.activities.all())` before the group loop.
 - [x] **#22** `musics/models.py:65-76` (`Part.for_activity`) — cache the
   `PartType.objects.get(name="Melody")` lookup; drop the redundant `.exists()` before
