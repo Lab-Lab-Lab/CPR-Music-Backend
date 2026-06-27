@@ -67,8 +67,8 @@ def test_change_instrument_updates_all_assignments():
     course, teacher, piece = _build(4)
     _patch(course, teacher, piece, new_instrument)
     instruments = set(
-        Assignment.objects.filter(
-            piece=piece, enrollment__course=course
-        ).values_list("instrument_id", flat=True)
+        Assignment.objects.filter(piece=piece, enrollment__course=course).values_list(
+            "instrument_id", flat=True
+        )
     )
     assert instruments == {new_instrument.id}
