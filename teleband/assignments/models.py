@@ -96,6 +96,62 @@ class AssignmentGroup(models.Model):
     type = models.CharField(max_length=255, null=True, blank=True)
 
 
+class CourseAssignment(models.Model):
+    """What a course is assigned: one row per (course, activity, piece), instead of
+    one Assignment per enrolled student. Per-student data (instrument, part) is
+    resolved at read time and persisted on Submission. See docs/remodel_phase2_design.md.
+    """
+
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE, related_name="course_assignments"
+    )
+    activity = models.ForeignKey(Activity, on_delete=models.PROTECT)
+    piece = models.ForeignKey(Piece, on_delete=models.PROTECT)
+    piece_plan = models.ForeignKey(
+        PiecePlan, on_delete=models.PROTECT, null=True, blank=True
+    )
+    deadline = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["course", "activity", "piece"],
+                name="unique_course_assignment",
+            )
+        ]
+        indexes = [models.Index(fields=["course", "piece"])]
+
+    def __str__(self):
+        return f"{self.course.slug}: {self.activity_id} {self.piece}"
+
+
+class GroupAssignment(models.Model):
+    """Links a student (enrollment) to a specific CourseAssignment within a group,
+    for telephone_fixed plans where different students get different activities.
+    Normal plans need no GroupAssignment -- every enrolled student is implicitly
+    assigned every non-grouped CourseAssignment in their course."""
+
+    group = models.ForeignKey(
+        AssignmentGroup, on_delete=models.CASCADE, related_name="memberships"
+    )
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE)
+    course_assignment = models.ForeignKey(
+        CourseAssignment, on_delete=models.CASCADE, related_name="group_assignments"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["enrollment", "course_assignment"],
+                name="unique_group_assignment",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.enrollment} -> {self.course_assignment} (group {self.group_id})"
+
+
 class PlannedActivity(models.Model):
 
     piece_plan = models.ForeignKey(PiecePlan, on_delete=models.CASCADE)

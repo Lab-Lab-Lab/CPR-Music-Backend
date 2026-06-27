@@ -7,7 +7,10 @@ from teleband.assignments.models import (
     ActivityType,
     Assignment,
     AssignmentGroup,
+    CourseAssignment,
+    GroupAssignment,
 )
+from teleband.courses.tests.factories import CourseFactory
 from teleband.courses.tests.factories import EnrollmentFactory
 from teleband.instruments.tests.factories import InstrumentFactory
 from teleband.musics.tests.factories import PartFactory, PartTypeFactory, PieceFactory
@@ -56,3 +59,21 @@ class AssignmentFactory(DjangoModelFactory):
 
     class Meta:
         model = Assignment
+
+
+class CourseAssignmentFactory(DjangoModelFactory):
+    course = SubFactory(CourseFactory)
+    activity = SubFactory(ActivityFactory)
+    piece = SubFactory(PieceFactory)
+
+    class Meta:
+        model = CourseAssignment
+
+
+class GroupAssignmentFactory(DjangoModelFactory):
+    group = SubFactory(AssignmentGroupFactory)
+    enrollment = SubFactory(EnrollmentFactory)
+    course_assignment = SubFactory(CourseAssignmentFactory)
+
+    class Meta:
+        model = GroupAssignment
