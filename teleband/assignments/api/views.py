@@ -79,33 +79,45 @@ class AssignmentViewSet(
         )
         return Response(serializer.data)
 
+    def _optimized_queryset(self, base):
+        # Shared select_related/prefetch_related so the list serializer never
+        # triggers per-row queries. Covers every relation walked by
+        # AssignmentViewSetSerializer: activity tree, instrument, piece, and the
+        # full part -> piece/transposition/sample tree (PartSerializer), plus
+        # submissions and their attachments.
+        return base.select_related(
+            "activity",
+            "activity__part_type",
+            "activity__activity_type",
+            "activity__activity_type__category",
+            "instrument",
+            "instrument__transposition",
+            "piece",
+            "part",
+            "part__part_type",
+            "part__piece",
+            "part__piece__composer",
+            "group",
+        ).prefetch_related(
+            "submissions",
+            "submissions__attachments",
+            "part__transpositions__transposition",
+            "part__instrument_samples",
+        )
+
     def get_queryset(self):
         course = Course.objects.get(slug=self.kwargs["course_slug_slug"])
         role = self.request.user.enrollment_set.get(course=course).role
 
         if role.name == "Student":
-            return (
+            return self._optimized_queryset(
                 Assignment.objects.filter(
                     enrollment__course=course, enrollment__user=self.request.user
                 )
-                .select_related(
-                    "activity",
-                    "instrument",
-                    "piece",
-                    "activity__part_type",
-                    "instrument__transposition",
-                    "group",
-                )
-                .prefetch_related("submissions")
             )
         if role.name == "Teacher":
-            return Assignment.objects.filter(enrollment__course=course).select_related(
-                "activity",
-                "instrument",
-                "piece",
-                "activity__part_type",
-                "instrument__transposition",
-                "group",
+            return self._optimized_queryset(
+                Assignment.objects.filter(enrollment__course=course)
             )
 
     def list(self, request, *args, **kwargs):

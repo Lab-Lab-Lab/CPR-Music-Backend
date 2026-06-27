@@ -40,18 +40,30 @@ class GroupSerializer(serializers.ModelSerializer):
     members = serializers.SerializerMethodField(method_name="get_members")
 
     def get_members(self, obj):
-        assignments = Assignment.objects.filter(group=obj)
-        assignment_enrollments = [(a, a.enrollment) for a in assignments]
-        member_list = [
-            {
-                "enrollment_id": ae[1].id,
-                "enrollment_username": ae[1].user.username,
-                "activity_type_name": ae[0].activity.activity_type_name,
-                "assignment_submitted": bool(ae[0].submissions.count()),
-            }
-            for ae in assignment_enrollments
-        ]
-        return member_list
+        # Memoize per group.id in the shared serializer context: a group is
+        # referenced once per member assignment, so without this the membership
+        # query (and its per-member walks) ran O(M) times per group -> O(M^2)
+        # across the list. Now it runs once per distinct group. select_related/
+        # prefetch keep the per-member enrollment/user/activity/submissions
+        # walks off the per-row path; bool(submissions.all()) uses the prefetch
+        # cache instead of a COUNT query.
+        cache = self.context.setdefault("_group_members", {})
+        if obj.id not in cache:
+            assignments = (
+                Assignment.objects.filter(group=obj)
+                .select_related("enrollment__user", "activity")
+                .prefetch_related("submissions")
+            )
+            cache[obj.id] = [
+                {
+                    "enrollment_id": a.enrollment.id,
+                    "enrollment_username": a.enrollment.user.username,
+                    "activity_type_name": a.activity.activity_type_name,
+                    "assignment_submitted": bool(a.submissions.all()),
+                }
+                for a in assignments
+            ]
+        return cache[obj.id]
 
     class Meta:
         model = AssignmentGroup
