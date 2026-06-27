@@ -136,7 +136,16 @@ class AssignmentViewSet(
             )
 
     def list(self, request, *args, **kwargs):
-        assignments = self.get_queryset()
+        # Annotate each assignment with its PlannedActivity.order via a correlated
+        # subquery instead of running a separate PlannedActivity query (with its
+        # Meta ordering join) and rebuilding the mapping in Python.
+        planned_order_subquery = PlannedActivity.objects.filter(
+            piece_plan_id=OuterRef("piece_plan_id"),
+            activity_id=OuterRef("activity_id"),
+        ).values("order")[:1]
+        assignments = self.get_queryset().annotate(
+            plan_order=Subquery(planned_order_subquery)
+        )
 
         serialized = AssignmentViewSetSerializer(
             assignments, context={"request": request}, many=True
@@ -147,19 +156,10 @@ class AssignmentViewSet(
             key = assignment["piece_slug"]
             grouped[key].append(assignment)
 
-        # Build a lookup of (piece_plan_id, activity_id) -> order from PlannedActivity
-        piece_plan_ids = {a.piece_plan_id for a in assignments if a.piece_plan_id}
-        planned_order = {}
-        for pa in PlannedActivity.objects.filter(piece_plan_id__in=piece_plan_ids):
-            planned_order[(pa.piece_plan_id, pa.activity_id)] = pa.order
-
-        # Map assignment id -> planned activity order
-        assignment_plan_order = {}
-        for a in assignments:
-            if a.piece_plan_id:
-                assignment_plan_order[a.id] = planned_order.get(
-                    (a.piece_plan_id, a.activity_id)
-                )
+        # Map assignment id -> planned activity order (from the annotation).
+        assignment_plan_order = {
+            a.id: a.plan_order for a in assignments if a.piece_plan_id
+        }
 
         # Fallback ordering by activity type name prefix
         fallback_ordering = {
