@@ -63,17 +63,17 @@ class Part(models.Model):
     chord_scale_pattern = models.JSONField(blank=True, null=True)
 
     def for_activity(activity, piece):
-        # Get this piece’s part for this kind of activity
-        kwargs = {"piece": piece}
-        if (
-            activity.part_type
-            and piece.parts.filter(part_type=activity.part_type).exists()
-        ):
-            kwargs["part_type"] = activity.part_type
-        # TODO: should we have an else for when it's null? I think so, here it is.
-        else:
-            kwargs["part_type"] = PartType.objects.get(name="Melody")
-        return Part.objects.get(**kwargs)
+        # Get this piece's part for this kind of activity, falling back to the
+        # piece's Melody part. A single get() with a DoesNotExist fallback
+        # replaces the old exists()+get() double query.
+        if activity.part_type:
+            try:
+                return Part.objects.get(piece=piece, part_type=activity.part_type)
+            except Part.DoesNotExist:
+                pass
+        return Part.objects.get(
+            piece=piece, part_type=PartType.objects.get(name="Melody")
+        )
 
     def __str__(self):
         return self.name

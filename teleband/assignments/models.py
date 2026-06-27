@@ -54,24 +54,6 @@ class PiecePlan(models.Model):
     piece = models.ForeignKey(Piece, on_delete=models.PROTECT)
     type = models.CharField(max_length=255, null=True, blank=True)
 
-    def assign(self, enrollment, instrument, deadline=None):
-        assignments = []
-        piece = self.piece
-        for activity in self.activities.all():
-            part = Part.for_activity(activity, piece)
-            assignments.append(
-                Assignment.objects.create(
-                    activity=activity,
-                    enrollment=enrollment,
-                    part=part,
-                    instrument=instrument,
-                    piece_plan=self,
-                    deadline=deadline,
-                    piece=self.piece,
-                )
-            )
-        return assignments
-
     def __str__(self):
         if self.type:
             return f"{self.name}: {self.piece.name} ({self.type})"
