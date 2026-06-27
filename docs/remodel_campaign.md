@@ -89,7 +89,7 @@ response-equivalence snapshot of every touched endpoint *before* editing.
 - [x] **#12 `dashboards/views.py:19` (`AssignmentListView`)** — split forward FKs into
   `select_related`, reverse/m2m into `prefetch_related`; add `paginate_by`.
   (Superuser-only, low blast radius.)
-- [ ] **#13 `UserViewSet.get_queryset`** (`users/api/views.py:64`) — list-comprehension
+- [x] **#13 `UserViewSet.get_queryset`** (`users/api/views.py:64`) — list-comprehension
   N+1 over `Enrollment…course`, **and** hardcodes `username="admin"` (scoping bug).
   Replace with one `.filter(enrollment__course__enrollment__user=request.user,
   enrollment__course__enrollment__role__name="Teacher").distinct()` — fixes N+1 **and**
@@ -100,18 +100,25 @@ response-equivalence snapshot of every touched endpoint *before* editing.
 
 ### 1b — Write batching + transactions (correctness first, then batch)
 
-> Add the `transaction.atomic` wrapper **first** (correctness), then `bulk_create`/
-> `.update()`. `bulk_create` verified safe: no custom `Assignment.save()`, no
-> pre/post_save signals, Postgres returns populated PKs.
+> **CORRECTION:** `ATOMIC_REQUESTS = True` in base/production/railway settings, so every
+> request is already wrapped in a transaction — no explicit `transaction.atomic` wrapper
+> needed (it'd just add redundant savepoints). 1b's real win is the `bulk_create`/`.update()`
+> query reduction. `bulk_create` verified safe: no custom `Assignment.save()`, no signals.
+>
+> **LANDMINE FOUND:** the live helper `assign_one_piece_activity` is invoked by the data
+> migration `assignments/0033_auto_20240312_2321.add_demos`. Eagerly `select_related("user")`
+> there selects `users.external_id` before that column's migration runs → breaks a fresh
+> `migrate`. Helper now select_relateds `instrument` only. General rule: helpers called from
+> migrations must not touch columns added by later migrations.
 
-- [ ] **#15 `assign_one_piece_activity`** (`courses/helper.py:23-42`, view
+- [x] **#15 `assign_one_piece_activity`** (`courses/helper.py:23-42`, view
   `courses/api/views.py:343`) — prefetch existing `(activity,enrollment,piece)` keys
   in one query, `bulk_create(missing, ignore_conflicts=True)` (~A INSERTs);
   `select_related("user","instrument")` on the Enrollment loop; wrap view in
   `transaction.atomic`.
-- [ ] **#16 `assign_curriculum`** (`courses/helper.py:117-126`, view `:387`) —
+- [x] **#16 `assign_curriculum`** (`courses/helper.py:117-126`, view `:387`) —
   `bulk_create` across all plans (~P·A INSERTs); wrap in `transaction.atomic`.
-- [ ] **#17 `change_piece_instrument`** (`courses/api/views.py:461-464`) — replace the
+- [x] **#17 `change_piece_instrument`** (`courses/api/views.py:461-464`) — replace the
   `save()` loop with
   `Assignment.objects.filter(piece=piece, enrollment__course=course)
   .update(instrument=instrument)` → 1 UPDATE.
@@ -122,7 +129,7 @@ response-equivalence snapshot of every touched endpoint *before* editing.
   for existence; `Enrollment.objects.bulk_create(ignore_conflicts=True)` after one
   `filter(user__in=…)` prefetch; resolve collisions in memory; wrap in transaction.
   (`create_user` can't bulk — password hashing.)
-- [ ] **#20 `update_or_create` lookup wider than constraint** (`courses/helper.py:29-37`
+- [x] **#20 `update_or_create` lookup wider than constraint** (`courses/helper.py:29-37`
   vs `assignments/models.py:102-106`) — make lookup keys exactly
   `(activity, enrollment, piece)`, move the rest into `defaults=`; stop swallowing
   `IntegrityError` silently.
