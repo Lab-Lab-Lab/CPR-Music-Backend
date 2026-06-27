@@ -38,9 +38,13 @@ Each item ships as its own commit with an `assertNumQueries` test proving the co
 is **constant** w.r.t. roster/group size (parametrize S = 1, 5, 30). Capture a
 response-equivalence snapshot of every touched endpoint *before* editing.
 
-> **Progress (branch `backend-remodel-phase1`):** #1–#4, #6, #8, #9, #10 landed with
-> query-count tests (`teleband/*/tests/test_query_counts.py`). Verified teeth: teacher
-> list 484→constant, grouped 1009→constant, grading `recent` 501→constant.
+> **Progress (branch `backend-remodel-phase1`, 11 commits):** all of 1a landed EXCEPT
+> #13 (held — behavior change). Done: #1–#4, #6–#12, #14, plus 1c #22/#25 and 1d indexes
+> (#26 + attachment), each with query-count tests (`teleband/*/tests/test_query_counts.py`).
+> Verified teeth: teacher list 484→const, grouped 1009→const (O(M²)), grading `recent`
+> 501→const, CSV export 9000+→2. Remaining 1a: #13, #21, #23, #24. Then 1b (write side).
+> Note: repo has 16 PRE-EXISTING black-dirty files on main (`black . --check` already
+> fails repo-wide under black 24.4.2) — separate cleanup, not this PR.
 
 ### 1a — Pure queryset / serializer (zero schema risk)
 
@@ -68,7 +72,7 @@ response-equivalence snapshot of every touched endpoint *before* editing.
 - [x] **#6 `EnrollmentViewSet.list`** (`courses/api/views.py:103-113`) —
   `select_related("course__owner","instrument__transposition","role","user")` +
   `prefetch_related("course__owner__groups","user__groups")`.
-- [ ] **#7 `CourseViewSet.roster` GET** (`courses/api/views.py:249-253`) —
+- [x] **#7 `CourseViewSet.roster` GET** (`courses/api/views.py:249-253`) —
   `select_related("user","instrument__transposition","role")` +
   `prefetch_related("user__groups")`.
 - [x] **#8 `PiecePlanViewSet`** (`assignments/api/views.py:163-173`) —
@@ -78,11 +82,11 @@ response-equivalence snapshot of every touched endpoint *before* editing.
   `select_related("activity_type","activity_type__category","part_type")`.
 - [x] **#10 `GradeViewSet`** (`submissions/api/views.py:109-114`) —
   `prefetch_related("student_submission","own_submission")`.
-- [ ] **#11 `dashboards/views.py:55` (`csv_view`)** — reverse relations are misused
+- [x] **#11 `dashboards/views.py:55` (`csv_view`)** — reverse relations are misused
   with `select_related` → full-table N+1; `submissions.all()` evaluated twice.
   Use `prefetch_related("submissions","submissions__attachments")`; guard nullable
   `assn.piece_plan` before `.id`.
-- [ ] **#12 `dashboards/views.py:19` (`AssignmentListView`)** — split forward FKs into
+- [x] **#12 `dashboards/views.py:19` (`AssignmentListView`)** — split forward FKs into
   `select_related`, reverse/m2m into `prefetch_related`; add `paginate_by`.
   (Superuser-only, low blast radius.)
 - [ ] **#13 `UserViewSet.get_queryset`** (`users/api/views.py:64`) — list-comprehension
@@ -90,7 +94,7 @@ response-equivalence snapshot of every touched endpoint *before* editing.
   Replace with one `.filter(enrollment__course__enrollment__user=request.user,
   enrollment__course__enrollment__role__name="Teacher").distinct()` — fixes N+1 **and**
   the bug.
-- [ ] **#14 permission/view duplicate point lookups** (`utils/permissions.py:21`,
+- [x] **#14 permission/view duplicate point lookups** (`utils/permissions.py:21`,
   `assignments/api/views.py:70,83-84`) — resolve course/enrollment once per request
   (cache on `request`), reuse role; `select_related("role","course")`.
 
@@ -127,7 +131,7 @@ response-equivalence snapshot of every touched endpoint *before* editing.
 
 - [ ] **#21** `courses/helper.py:68,100` — hoist
   `activities = list(piece_plan.activities.all())` before the group loop.
-- [ ] **#22** `musics/models.py:65-76` (`Part.for_activity`) — cache the
+- [x] **#22** `musics/models.py:65-76` (`Part.for_activity`) — cache the
   `PartType.objects.get(name="Melody")` lookup; drop the redundant `.exists()` before
   `.get()`. **Prerequisite for Phase 2** (the plan moves this call to read time).
 - [ ] **#23** `assignments/api/views.py:123-135` — annotate the queryset with a
@@ -135,12 +139,12 @@ response-equivalence snapshot of every touched endpoint *before* editing.
   per request.
 - [ ] **#24** `assignments/api/views.py:126` — add explicit `.order_by()` (the
   `Meta.ordering` spanning `piece_plan__name` forces an unused sort).
-- [ ] **#25** `assignments/models.py:57-73` (`PiecePlan.assign`) — delete (confirmed
+- [x] **#25** `assignments/models.py:57-73` (`PiecePlan.assign`) — delete (confirmed
   zero callers; a trap if reused).
 
 ### 1d — Additive index migrations (non-breaking; see Open Q #6)
 
-- [ ] **#26** `submissions/models.py:38` — composite index `(assignment, submitted DESC)`
+- [x] **#26** `submissions/models.py:38` — composite index `(assignment, submitted DESC)`
   for latest-per-assignment (`submissions/api/views.py:80-94`).
 - [ ] `submissions/models.py:53-56` — index for `SubmissionAttachment.Meta.ordering`
   `(submission, submitted)`, or drop the implicit ordering.
