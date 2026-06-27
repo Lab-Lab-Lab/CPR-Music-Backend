@@ -5,8 +5,12 @@ from teleband.assignments.models import (
     Activity,
     ActivityType,
     AssignmentGroup,
+    CourseAssignment,
+    GroupAssignment,
     PiecePlan,
 )
+from teleband.musics.models import Part
+from teleband.submissions.models import Submission
 from teleband.courses.api.serializers import EnrollmentSerializer
 from teleband.instruments.api.serializers import InstrumentSerializer
 from teleband.submissions.api.serializers import SubmissionSerializer
@@ -186,3 +190,56 @@ class PiecePlanSerializer(serializers.ModelSerializer):
         # extra_kwargs = {
         #     "url": {"view_name": "api:pieceplan-detail", "lookup_field": "id"},
         # }
+
+
+def resolve_instrument(enrollment):
+    """The instrument a student uses: their enrollment instrument, else their
+    user instrument (the Phase 1 / dual-write fallback, kept per the design)."""
+    return enrollment.instrument or enrollment.user.instrument
+
+
+class CourseAssignmentReadSerializer(serializers.Serializer):
+    """Phase 2 read path: produces the SAME per-assignment shape as
+    AssignmentViewSetSerializer, but resolved from a CourseAssignment against a
+    student enrollment (passed in context as ``enrollment``). The ``id`` is the
+    CourseAssignment id. Per-student data (instrument, part, submissions, group) is
+    resolved at read time. A response-equivalence test pins that this matches the
+    legacy per-student serializer field-for-field except ``id``."""
+
+    def to_representation(self, ca):
+        enrollment = self.context["enrollment"]
+        activity = ca.activity
+        instrument = resolve_instrument(enrollment)
+        part = Part.for_activity(activity, ca.piece)
+        submissions = (
+            Submission.objects.filter(course_assignment=ca, enrollment=enrollment)
+            .order_by("id")
+            .prefetch_related("attachments")
+        )
+        group_assignment = (
+            GroupAssignment.objects.select_related("group")
+            .filter(course_assignment=ca, enrollment=enrollment)
+            .first()
+        )
+        group = group_assignment.group if group_assignment else None
+        transposition = instrument.transposition if instrument else None
+        return {
+            "id": ca.id,
+            "activity": activity.id,
+            "activity_type_name": activity.activity_type_name,
+            "activity_type_category": activity.category,
+            "activity_body": activity.body,
+            "part_type": activity.part_type.name if activity.part_type else None,
+            "piece_name": ca.piece.name,
+            "piece_id": ca.piece.id,
+            "piece_slug": ca.piece.slug,
+            "instrument": instrument.name if instrument else None,
+            "transposition": transposition.name if transposition else None,
+            "group": (
+                GroupSerializer(group, context=self.context).data if group else None
+            ),
+            "part": PartSerializer(part, context=self.context).data,
+            "submissions": SubmissionSerializer(
+                submissions, many=True, context=self.context
+            ).data,
+        }
