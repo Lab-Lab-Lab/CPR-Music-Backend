@@ -1,4 +1,3 @@
-from django.db import IntegrityError
 from teleband.courses.models import Enrollment, Course
 from teleband.musics.models import Piece, Part
 from teleband.assignments.models import (
@@ -21,25 +20,39 @@ def assign_all_piece_activities(course, piece, deadline=None):
 
 
 def assign_one_piece_activity(course, piece, activity, deadline=None, piece_plan=None):
-    assignments = []
+    # One row per (activity, enrollment, piece) -- the model's unique constraint.
+    # Create the missing ones in a single bulk_create instead of an
+    # update_or_create per student (which was 2 queries each and silently
+    # swallowed the constraint violation on re-assign). Students who already have
+    # the assignment are left untouched, matching the prior effective behavior.
     part = Part.for_activity(activity, piece)
-    for e in Enrollment.objects.filter(course=course, role__name="Student"):
-        try:
-            # TODO is it reasonable to make this update_or_create?
-            assn, assn_created = Assignment.objects.update_or_create(
-                activity=activity,
-                enrollment=e,
-                instrument=e.instrument if e.instrument else e.user.instrument,
-                part=part,
-                piece=piece,
-                piece_plan=piece_plan,
-                deadline=deadline,
-            )
-            if assn_created:
-                assignments.append(assn)
-        except IntegrityError as e:
-            print(f"IntegrityError: {e}")
-    return assignments
+    # NB: do NOT select_related("user") here. This helper is called from the live
+    # data migration assignments/0033, where eagerly selecting all user columns
+    # touches users.external_id before that column's migration has run. Enrollment
+    # instrument is enough; user is only read for the rare no-enrollment-instrument
+    # fallback below.
+    enrollments = Enrollment.objects.filter(
+        course=course, role__name="Student"
+    ).select_related("instrument")
+    already_assigned = set(
+        Assignment.objects.filter(
+            activity=activity, piece=piece, enrollment__course=course
+        ).values_list("enrollment_id", flat=True)
+    )
+    to_create = [
+        Assignment(
+            activity=activity,
+            enrollment=e,
+            instrument=e.instrument if e.instrument else e.user.instrument,
+            part=part,
+            piece=piece,
+            piece_plan=piece_plan,
+            deadline=deadline,
+        )
+        for e in enrollments
+        if e.id not in already_assigned
+    ]
+    return Assignment.objects.bulk_create(to_create)
 
 
 def assign_piece_plan(course, piece_plan, deadline=None):
