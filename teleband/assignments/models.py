@@ -1,8 +1,7 @@
 from django.db import models
 
 from teleband.courses.models import Course, Enrollment
-from teleband.instruments.models import Instrument
-from teleband.musics.models import Part, PartType, Piece
+from teleband.musics.models import PartType, Piece
 
 
 class ActivityCategory(models.Model):
@@ -59,36 +58,6 @@ class PiecePlan(models.Model):
             return f"{self.name}: {self.piece.name} ({self.type})"
         else:
             return f"{self.name}: {self.piece.name} "
-
-
-class Assignment(models.Model):
-
-    activity = models.ForeignKey(Activity, on_delete=models.PROTECT)
-    enrollment = models.ForeignKey(Enrollment, on_delete=models.PROTECT)
-    part = models.ForeignKey(Part, on_delete=models.PROTECT)
-    deadline = models.DateField(null=True, blank=True)
-    instrument = models.ForeignKey(Instrument, on_delete=models.PROTECT)
-    piece_plan = models.ForeignKey(
-        PiecePlan, on_delete=models.PROTECT, null=True, blank=True
-    )
-    piece = models.ForeignKey(Piece, on_delete=models.PROTECT, null=True, blank=True)
-    group = models.ForeignKey(
-        "AssignmentGroup", on_delete=models.PROTECT, null=True, blank=True
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        # FIXME: do this with https://docs.djangoproject.com/en/5.0/ref/models/options/#unique-together instead.
-        # nevermind, this may be deprecated
-        constraints = [
-            models.UniqueConstraint(
-                fields=["activity", "enrollment", "piece"], name="unique_assignment"
-            )
-        ]
-
-    def __str__(self):
-        return f"[{self.enrollment.user.username}] {self.activity.id} {self.piece}"
 
 
 class AssignmentGroup(models.Model):

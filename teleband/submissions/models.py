@@ -1,8 +1,6 @@
 from django.db import models
 from django.conf import settings
 
-from teleband.assignments.models import Assignment
-
 
 class Grade(models.Model):
 
@@ -31,20 +29,8 @@ class Submission(models.Model):
         null=True,
         related_name="own_submission",
     )
-    # Legacy per-student link. Nullable during the Phase 2 transition so late
-    # joiners (no Assignment row) can submit against a CourseAssignment; dropped
-    # in step 8 once reads no longer use it.
-    assignment = models.ForeignKey(
-        Assignment,
-        on_delete=models.PROTECT,
-        related_name="submissions",
-        null=True,
-        blank=True,
-    )
-    # Phase 2: a submission belongs to a course-level CourseAssignment and the
-    # student (enrollment) who made it, and records the instrument/part it was
-    # made with. Nullable during the transition (dual-populated from `assignment`);
-    # `assignment` is dropped once the read path no longer uses it.
+    # A submission belongs to a course-level CourseAssignment and the student
+    # (enrollment) who made it, and records the instrument/part it was made with.
     course_assignment = models.ForeignKey(
         "assignments.CourseAssignment",
         on_delete=models.PROTECT,
@@ -67,15 +53,13 @@ class Submission(models.Model):
 
     class Meta:
         indexes = [
-            # Supports "latest submission per assignment" lookups
-            # (TeacherSubmissionViewSet.recent orders by -submitted per assignment).
-            models.Index(fields=["assignment", "-submitted"]),
+            # Supports "latest submission per (course assignment, enrollment)"
+            # lookups (TeacherSubmissionViewSet.recent orders by -submitted).
+            models.Index(fields=["course_assignment", "enrollment", "-submitted"]),
         ]
 
     def __str__(self):
-        # assignment is nullable in Phase 2 (late joiners); fall back to the
-        # course-level assignment / submission id.
-        return f"{self.assignment_id or self.course_assignment_id or self.id}"
+        return f"{self.course_assignment_id or self.id}"
 
 
 class SubmissionAttachment(models.Model):
@@ -102,16 +86,9 @@ class SubmissionAttachment(models.Model):
 class ActivityProgress(models.Model):
     """Tracks student progress through DAW study activities."""
 
-    assignment = models.OneToOneField(
-        Assignment,
-        on_delete=models.CASCADE,
-        related_name="activity_progress",
-        null=True,
-        blank=True,
-    )
-    # Phase 2: progress is per (course_assignment, enrollment). Nullable during the
-    # transition (dual-populated from `assignment`); the unique (course_assignment,
-    # enrollment) constraint and dropping `assignment` happen when reads flip.
+    # Progress is per (course_assignment, enrollment) -- see the unique constraint
+    # in Meta. Nullable to tolerate legacy rows that never backfilled a
+    # course_assignment.
     course_assignment = models.ForeignKey(
         "assignments.CourseAssignment",
         on_delete=models.CASCADE,
@@ -169,7 +146,4 @@ class ActivityProgress(models.Model):
         ]
 
     def __str__(self):
-        # assignment is nullable in Phase 2 (late joiners); fall back to the
-        # course-level assignment.
-        ref = self.assignment_id or self.course_assignment_id
-        return f"Assignment {ref} - Step {self.current_step}"
+        return f"Assignment {self.course_assignment_id} - Step {self.current_step}"
