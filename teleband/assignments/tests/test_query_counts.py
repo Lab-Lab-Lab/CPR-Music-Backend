@@ -158,12 +158,18 @@ class TestAssignmentListQueryCounts:
             enrollment = EnrollmentFactory(course=course, role=student_role)
             for _ in range(num_activities):
                 part = PartFactory(piece=piece)
+                activity = ActivityFactory(part_type=part.part_type)
                 AssignmentFactory(
-                    activity=ActivityFactory(part_type=part.part_type),
+                    activity=activity,
                     enrollment=enrollment,
                     part=part,
                     instrument=enrollment.instrument,
                     piece=piece,
+                )
+                # ActivityViewSet now reads CourseAssignment for the course's
+                # distinct activities; dual-write one per activity.
+                CourseAssignment.objects.create(
+                    course=course, activity=activity, piece=piece
                 )
             return course, teacher
 

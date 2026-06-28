@@ -48,10 +48,11 @@ class ActivityViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):
     permission_classes = [IsTeacher]
 
     def get_queryset(self):
-        # Define a subquery to get the first assignment for each activity
+        # Phase 2: the activities assigned in a course come from CourseAssignment
+        # (one row per (course, activity, piece)), not per-student Assignment rows.
         distinct_activity_assignments = (
-            Assignment.objects.filter(
-                enrollment__course__slug=self.kwargs["course_slug_slug"],
+            CourseAssignment.objects.filter(
+                course__slug=self.kwargs["course_slug_slug"],
                 activity=OuterRef("id"),
             )
             .order_by("id", "pk")
