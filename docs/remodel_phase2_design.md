@@ -173,8 +173,7 @@ This mirrors the phased discipline that worked for Phase 1.
      reads the populated `assignment` FK — both fine until step 8.
 
    **Step 7 COMPLETE** (student + teacher list/retrieve, submissions, activity-progress).
-8. 🔶 **Contract & drop** — IN PROGRESS. **Reads + writes off Assignment DONE** (Assignment is now
-   dead — neither read nor written for new data):
+8. ✅ **Contract & drop** — COMPLETE. `Assignment` is gone — neither read, written, nor a table:
    - Repointed reads: `GroupSerializer.get_members` → `GroupAssignment`; `TeacherSubmissionViewSet.recent`
      + serializer → the submission's own course_assignment/enrollment/instrument/part (frontend reads
      only `assignment.enrollment.user.name` there); `ActivityViewSet` distinct-activity list → `CourseAssignment`.
@@ -183,13 +182,22 @@ This mirrors the phased discipline that worked for Phase 1.
      step-7 read flip had stopped honoring.)
    - **Stopped writing Assignment:** `assign_one_piece_activity`/`assign_telephone_fixed` create only
      `CourseAssignment` (+ `GroupAssignment`); assign endpoints return a count (frontend ignores the body).
-   - **REMAINING (destructive, gated on review):** add `unique(course_assignment, enrollment)` to
-     `ActivityProgress`; remove `resolve_legacy_assignment` + the `assignment=` write in
-     `SubmissionViewSet.perform_create`; drop the dead `AssignmentViewSet` teacher retrieve/update/notation
-     actions; drop `Submission.assignment` + `ActivityProgress.assignment` FKs; drop the `Assignment`
-     model + dead serializers (`AssignmentSerializer`/`AssignmentViewSetSerializer`/`AssignmentInstrument`/
-     `NotationAssignment`). Note: dropping the Assignment rows is safe (fully backfilled into
-     CourseAssignment); ActivityProgress/Submission rows are NOT deleted (only their redundant FK column).
+   - **DONE (destructive):** added `unique(course_assignment, enrollment)` to `ActivityProgress`
+     (mig 0019); removed `resolve_legacy_assignment` + the `assignment=` write in
+     `SubmissionViewSet.perform_create`; dropped the dead `AssignmentViewSet` teacher
+     retrieve/update/notation actions and the dead serializers (`AssignmentSerializer`/
+     `AssignmentViewSetSerializer`/`AssignmentInstrument`/`NotationAssignment`); dropped
+     `Submission.assignment` + `ActivityProgress.assignment` FKs (submissions mig 0020) and the
+     `Assignment` model itself (assignments migs 0041 RemoveConstraint+RemoveField, 0042 DeleteModel).
+     `ActivityProgressSerializer` now exposes `course_assignment`/`enrollment`. Migration 0041 drops
+     the `unique_assignment` constraint *before* the field removals so SQLite's table-remake doesn't
+     reference removed fields. Assignment rows were safe to drop (fully backfilled into
+     CourseAssignment); ActivityProgress/Submission rows kept all data (only the redundant FK column went).
+   - Test fixtures migrated off `AssignmentFactory` (removed): list/teacher/student/query-count tests
+     now build only `CourseAssignment` rows; `SubmissionFactory` keys by `course_assignment`/`enrollment`.
+     Obsolete transitional tests deleted (`test_backfill_course_assignments`, the two migration-backfill
+     tests in submissions). Full assignments/submissions/courses/dashboards suite green; only the two
+     pre-existing user-test failures remain. CI `format-check` green on PR #56.
 
 ### Frontend contract surface (verified against `~/GithubOrgs/espadonne/CPR-Music`)
 
@@ -197,8 +205,8 @@ Per-assignment `id` from the list is consumed by exactly: `GET /assignments/{id}
 `GET|POST /assignments/{id}/submissions/`, `POST .../submissions/{sid}/attachments/` (keyed by
 submission pk, unaffected), and `*/activity-progress/{,log_event,submit_step,save_response,save_audio_state}`.
 **There is no per-assignment `PATCH`** — instrument changes go through course-level
-`PATCH /courses/{slug}/change_piece_instrument/` (by `piece_id`), which still updates `Assignment`
-rows during the transition. So the student contract surface flipped in step 7 is complete.
+`PATCH /courses/{slug}/change_piece_instrument/` (by `piece_id`), which now sets
+`CourseAssignment.instrument`. So the student contract surface flipped in step 7 is complete.
 
 Each step is independently shippable with query-count + response-equivalence tests, same as Phase 1.
 Steps 7–8 are the contract-sensitive half — review the dual-write foundation (PR #56) first.
