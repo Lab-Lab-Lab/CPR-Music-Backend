@@ -8,11 +8,12 @@ from .models import Submission, SubmissionAttachment, Grade, ActivityProgress
 class SubmissionAdmin(VersionAdmin):
     list_display = (
         "id",
-        "assignment",
+        "course_assignment",
+        "enrollment",
         "submitted",
     )
-    list_filter = ("assignment__piece",)
-    raw_id_fields = ("assignment",)
+    list_filter = ("course_assignment__piece",)
+    raw_id_fields = ("course_assignment", "enrollment", "instrument", "part")
 
 
 @admin.register(SubmissionAttachment)
@@ -42,14 +43,15 @@ class GradeAdmin(VersionAdmin):
 class ActivityProgressAdmin(VersionAdmin):
     list_display = (
         "id",
-        "assignment",
+        "course_assignment",
+        "enrollment",
         "current_step",
         "participant_email",
         "created_at",
         "updated_at",
     )
     list_filter = ("current_step", "created_at")
-    search_fields = ("participant_email", "assignment__id")
+    search_fields = ("participant_email", "course_assignment__id")
     readonly_fields = (
         "activity_logs",
         "step_completions",
@@ -59,4 +61,4 @@ class ActivityProgressAdmin(VersionAdmin):
         "created_at",
         "updated_at",
     )
-    raw_id_fields = ("assignment",)
+    raw_id_fields = ("course_assignment", "enrollment")
