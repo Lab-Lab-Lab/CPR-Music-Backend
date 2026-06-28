@@ -274,9 +274,18 @@ class AssignmentViewSet(
             ).select_related("group")
         }
 
-        # part resolver: one Part query for every piece in play (with the tree
-        # PartSerializer walks), then resolve (activity, piece) -> Part in memory,
-        # mirroring Part.for_activity's part_type match with a Melody fallback.
+        return {
+            "submissions_by_ca": submissions_by_ca,
+            "group_by_ca": group_by_ca,
+            "part_for": self._part_resolver(course_assignments),
+        }
+
+    def _part_resolver(self, course_assignments):
+        # One Part query for every piece in play (with the tree PartSerializer
+        # walks), then resolve (activity, piece) -> Part in memory, mirroring
+        # Part.for_activity's part_type match with a Melody fallback. Shared by the
+        # student and teacher lists so part resolution never hits the N+1 path.
+        pieces = {ca.piece for ca in course_assignments}
         parts = (
             Part.objects.filter(piece__in=pieces)
             .select_related("part_type", "piece", "piece__composer")
@@ -296,26 +305,44 @@ class AssignmentViewSet(
                     return hit
             return melody_by_piece.get(piece.id)
 
-        return {
-            "submissions_by_ca": submissions_by_ca,
-            "group_by_ca": group_by_ca,
-            "part_for": part_for,
-        }
+        return part_for
 
     def _teacher_list(self, request):
-        # Legacy per-student Assignment read path (unchanged); flipped to
-        # CourseAssignment in a later step alongside the teacher cardinality change.
+        # Phase 2: a teacher sees what the COURSE is assigned -- one row per
+        # CourseAssignment (every assigned (piece, activity)), not one per student.
+        # The frontend's teacher view only derives the distinct (piece, activity)
+        # set from this list, so per-student fields come back null/empty. This
+        # collapses the response from A*S rows to A and makes it constant in roster.
         planned_order_subquery = PlannedActivity.objects.filter(
             piece_plan_id=OuterRef("piece_plan_id"),
             activity_id=OuterRef("activity_id"),
         ).values("order")[:1]
-        assignments = self.get_queryset().annotate(
-            plan_order=Subquery(planned_order_subquery)
+        course_assignments = list(
+            CourseAssignment.objects.filter(
+                course__slug=self.kwargs["course_slug_slug"]
+            )
+            .select_related(
+                "activity",
+                "activity__part_type",
+                "activity__activity_type",
+                "activity__activity_type__category",
+                "piece",
+            )
+            .annotate(plan_order=Subquery(planned_order_subquery))
         )
-        serialized = AssignmentViewSetSerializer(
-            assignments, context={"request": request}, many=True
+        # part_for keeps the per-row Part lookup off the N+1 path; submissions/group
+        # are empty for the teacher (enrollment=None), so only the part map is built.
+        context = {
+            "request": request,
+            "enrollment": None,
+            "part_for": self._part_resolver(course_assignments),
+        }
+        serialized = CourseAssignmentReadSerializer(
+            course_assignments, many=True, context=context
         ).data
-        plan_order_by_id = {a.id: a.plan_order for a in assignments if a.piece_plan_id}
+        plan_order_by_id = {
+            ca.id: ca.plan_order for ca in course_assignments if ca.piece_plan_id
+        }
         return Response(self._grouped_by_piece(serialized, plan_order_by_id))
 
     def list(self, request, *args, **kwargs):

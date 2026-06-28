@@ -48,6 +48,10 @@ def _build_course(num_students, num_activities=3, group=None):
     activities = [
         ActivityFactory(part_type=parts[i].part_type) for i in range(num_activities)
     ]
+    # Phase 2 teacher list reads CourseAssignment (one row per (course, activity,
+    # piece), not per student); dual-write them so the teacher path is exercised.
+    for activity in activities:
+        CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
 
     for _ in range(num_students):
         enrollment = EnrollmentFactory(course=course, role=student_role)

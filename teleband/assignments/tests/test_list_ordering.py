@@ -9,7 +9,7 @@ plan order regardless of assignment creation order.
 import pytest
 from rest_framework.test import APIClient
 
-from teleband.assignments.models import PiecePlan, PlannedActivity
+from teleband.assignments.models import CourseAssignment, PiecePlan, PlannedActivity
 from teleband.assignments.tests.factories import ActivityFactory, AssignmentFactory
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
 from teleband.musics.tests.factories import PartFactory, PieceFactory
@@ -40,6 +40,8 @@ def test_list_sorted_by_planned_activity_order():
         activities.append((activity, part))
 
     # Create the assignments in REVERSE order so DB/creation order != plan order.
+    # The list now reads CourseAssignment; dual-write a CA per activity (carrying
+    # piece_plan so the plan-order annotation resolves) plus the legacy Assignment.
     for activity, part in reversed(activities):
         AssignmentFactory(
             activity=activity,
@@ -48,6 +50,9 @@ def test_list_sorted_by_planned_activity_order():
             instrument=student.instrument,
             piece=piece,
             piece_plan=plan,
+        )
+        CourseAssignment.objects.create(
+            course=course, activity=activity, piece=piece, piece_plan=plan
         )
 
     client = APIClient()

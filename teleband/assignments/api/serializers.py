@@ -215,6 +215,9 @@ class CourseAssignmentReadSerializer(serializers.Serializer):
         by_ca = self.context.get("submissions_by_ca")
         if by_ca is not None:
             return by_ca.get(ca.id, [])
+        if enrollment is None:
+            # Teacher list: no per-student enrollment, so no per-student submissions.
+            return []
         return list(
             Submission.objects.filter(course_assignment=ca, enrollment=enrollment)
             .order_by("id")
@@ -225,6 +228,8 @@ class CourseAssignmentReadSerializer(serializers.Serializer):
         by_ca = self.context.get("group_by_ca")
         if by_ca is not None:
             return by_ca.get(ca.id)
+        if enrollment is None:
+            return None
         group_assignment = (
             GroupAssignment.objects.select_related("group")
             .filter(course_assignment=ca, enrollment=enrollment)
@@ -255,9 +260,12 @@ class CourseAssignmentReadSerializer(serializers.Serializer):
         )
 
     def to_representation(self, ca):
+        # enrollment is None on the teacher list (no per-student context); the
+        # per-student fields (instrument/transposition/submissions/group) come back
+        # null/empty, while the piece/activity/part fields are fully populated.
         enrollment = self.context["enrollment"]
         activity = ca.activity
-        instrument = resolve_instrument(enrollment)
+        instrument = resolve_instrument(enrollment) if enrollment else None
         part = self._part_for(ca)
         submissions = self._submissions_for(ca, enrollment)
         group = self._group_for(ca, enrollment)
