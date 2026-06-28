@@ -12,6 +12,7 @@ from django.test.utils import CaptureQueriesContext
 from django.db import connection
 from rest_framework.test import APIClient
 
+from teleband.assignments.models import CourseAssignment
 from teleband.assignments.tests.factories import (
     ActivityFactory,
     ActivityTypeFactory,
@@ -44,6 +45,7 @@ def _build_recent_scenario(num_students):
         part=part, transposition=InstrumentFactory().transposition
     )
     activity = ActivityFactory(activity_type=activity_type, part_type=part.part_type)
+    ca = CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
 
     for _ in range(num_students):
         enrollment = EnrollmentFactory(course=course, role=student_role)
@@ -54,7 +56,15 @@ def _build_recent_scenario(num_students):
             instrument=enrollment.instrument,
             piece=piece,
         )
-        submission = SubmissionFactory(assignment=assignment)
+        # Phase 2: recent reads the submission's own fields; dual-populate them as
+        # SubmissionViewSet.perform_create does.
+        submission = SubmissionFactory(
+            assignment=assignment,
+            course_assignment=ca,
+            enrollment=enrollment,
+            instrument=enrollment.instrument,
+            part=part,
+        )
         SubmissionAttachment.objects.create(submission=submission, file="a.wav")
 
     return course, teacher, activity_type.name, piece.slug
@@ -71,6 +81,21 @@ def _count_recent_queries(course, user, activity_name, piece_slug):
         response = client.get(url)
     assert response.status_code == 200, response.content
     return len(ctx.captured_queries), response.data
+
+
+def test_recent_assignment_object_built_from_native_fields():
+    """The embedded assignment object (now built from the submission's own fields)
+    carries the field the grading UI reads -- enrollment.user.name -- plus the
+    CourseAssignment id."""
+    course, teacher, a_name, p_slug = _build_recent_scenario(3)
+    _, data = _count_recent_queries(course, teacher, a_name, p_slug)
+
+    assert len(data) == 3
+    for row in data:
+        assignment = row["assignment"]
+        assert assignment["enrollment"]["user"]["name"]  # the only consumed field
+        assert isinstance(assignment["id"], int)
+        assert assignment["instrument"] is not None
 
 
 def test_recent_constant_in_student_count():

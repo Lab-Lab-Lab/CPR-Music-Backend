@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import OuterRef, Q, Subquery
@@ -23,7 +25,7 @@ from teleband.submissions.models import (
     SubmissionAttachment,
     ActivityProgress,
 )
-from teleband.assignments.models import Assignment, CourseAssignment
+from teleband.assignments.models import Assignment, CourseAssignment, GroupAssignment
 from teleband.assignments.api.serializers import resolve_instrument
 from teleband.musics.models import Part
 from datetime import datetime
@@ -146,61 +148,85 @@ class TeacherSubmissionViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
         piece_slug = request.GET["piece_slug"]
         activity_name = request.GET["activity_name"]
 
-        # https://chatgpt.com/share/827ac4eb-110d-423c-a106-1e696059fc83
-        # Define a subquery to get the latest submission for each enrollment
+        # Phase 2: resolve the latest submission per enrollment from the
+        # submission's own fields (course_assignment / enrollment / part) instead
+        # of the dropped assignment FK.
         latest_submissions = (
             Submission.objects.filter(
-                assignment__enrollment=OuterRef("assignment__enrollment"),
-                assignment__enrollment__course__slug=course_id,
-                assignment__activity__activity_type__name=activity_name,
-                assignment__part__piece__slug=piece_slug,
+                enrollment=OuterRef("enrollment"),
+                enrollment__course__slug=course_id,
+                course_assignment__activity__activity_type__name=activity_name,
+                course_assignment__piece__slug=piece_slug,
             )
             .order_by("-submitted")
             .values("pk")[:1]
         )
 
-        # Use the subquery to filter the main queryset. The select_related/
-        # prefetch_related below cover every relation walked by
-        # TeacherSubmissionSerializer -> AssignmentSerializer ->
-        # EnrollmentSerializer (course/owner, instrument, part tree, activity
-        # tree) plus the grades and attachments, so serialization issues a
-        # constant number of queries regardless of how many students submitted.
-        filtered_submissions = (
+        # select_related/prefetch cover every relation SubmissionAssignmentSerializer
+        # walks (activity tree, instrument, part tree, enrollment course/owner/role),
+        # so serialization issues a constant number of queries regardless of how many
+        # students submitted.
+        submissions = list(
             Submission.objects.filter(pk__in=Subquery(latest_submissions))
             .select_related(
                 "grade",
                 "self_grade",
-                "assignment__activity__activity_type__category",
-                "assignment__activity__part_type",
-                "assignment__instrument__transposition",
-                "assignment__part__part_type",
-                "assignment__part__piece__composer",
-                "assignment__piece",
-                "assignment__group",
-                "assignment__enrollment__user",
-                "assignment__enrollment__instrument__transposition",
-                "assignment__enrollment__role",
-                "assignment__enrollment__course__owner",
+                "course_assignment__activity__activity_type__category",
+                "course_assignment__activity__part_type",
+                "course_assignment__piece",
+                "instrument__transposition",
+                "part__part_type",
+                "part__piece__composer",
+                "enrollment__user",
+                "enrollment__instrument__transposition",
+                "enrollment__role",
+                "enrollment__course__owner",
             )
             .prefetch_related(
                 "attachments",
-                "assignment__submissions",
-                "assignment__submissions__attachments",
-                "assignment__part__transpositions__transposition",
-                "assignment__part__instrument_samples",
-                "assignment__enrollment__user__groups",
-                "assignment__enrollment__course__owner__groups",
+                "part__transpositions__transposition",
+                "part__instrument_samples",
+                "enrollment__user__groups",
+                "enrollment__course__owner__groups",
             )
-            .order_by("assignment__enrollment", "-submitted")
+            .order_by("enrollment", "-submitted")
         )
-
-        # The final queryset will have the latest submissions for each enrollment
-        submissions = filtered_submissions
 
         serializer = self.serializer_class(
-            submissions, many=True, context={"request": request}
+            submissions,
+            many=True,
+            context={"request": request, **self._assignment_maps(submissions)},
         )
         return Response(status=status.HTTP_200_OK, data=serializer.data)
+
+    @staticmethod
+    def _assignment_maps(submissions):
+        # Per-(course_assignment, enrollment) maps for the nested assignment object's
+        # `submissions` and `group` fields -- two queries total, so the recent view
+        # stays constant in roster size.
+        ca_ids = [s.course_assignment_id for s in submissions]
+        enr_ids = [s.enrollment_id for s in submissions]
+
+        submissions_by_pair = defaultdict(list)
+        for s in (
+            Submission.objects.filter(
+                course_assignment_id__in=ca_ids, enrollment_id__in=enr_ids
+            )
+            .order_by("id")
+            .prefetch_related("attachments")
+        ):
+            submissions_by_pair[(s.course_assignment_id, s.enrollment_id)].append(s)
+
+        group_by_pair = {
+            (ga.course_assignment_id, ga.enrollment_id): ga.group_id
+            for ga in GroupAssignment.objects.filter(
+                course_assignment_id__in=ca_ids, enrollment_id__in=enr_ids
+            )
+        }
+        return {
+            "submissions_by_pair": submissions_by_pair,
+            "group_by_pair": group_by_pair,
+        }
 
 
 class GradeViewSet(ModelViewSet):
