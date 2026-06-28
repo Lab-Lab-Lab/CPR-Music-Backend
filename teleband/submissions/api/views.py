@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import OuterRef, Subquery
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import action
@@ -25,7 +25,7 @@ from teleband.submissions.models import (
     SubmissionAttachment,
     ActivityProgress,
 )
-from teleband.assignments.models import Assignment, CourseAssignment, GroupAssignment
+from teleband.assignments.models import CourseAssignment, GroupAssignment
 from teleband.assignments.api.serializers import resolve_instrument
 from teleband.musics.models import Part
 from datetime import datetime
@@ -49,22 +49,6 @@ def resolve_student_target(request, course_slug, course_assignment_id):
         course=enrollment.course,
     )
     return course_assignment, enrollment
-
-
-def resolve_legacy_assignment(enrollment, course_assignment):
-    """Best-effort link back to a per-student Assignment for (enrollment,
-    course_assignment), so writes keep the legacy `assignment` FK populated for
-    existing students (teacher views still read it). None for late joiners."""
-    return (
-        Assignment.objects.filter(
-            enrollment=enrollment, activity_id=course_assignment.activity_id
-        )
-        .filter(
-            Q(piece_id=course_assignment.piece_id)
-            | Q(part__piece_id=course_assignment.piece_id)
-        )
-        .first()
-    )
 
 
 class SubmissionViewSet(
@@ -95,13 +79,9 @@ class SubmissionViewSet(
     def perform_create(self, serializer):
         # Phase 2: record the course-level assignment, the student (enrollment),
         # and the instrument/part the work was made with, resolved from the
-        # enrollment at write time. The legacy `assignment` FK is still populated
-        # when an Assignment row exists (so teacher views keep working); it's null
-        # for late joiners.
+        # enrollment at write time.
         course_assignment, enrollment = self._target()
-        assignment = resolve_legacy_assignment(enrollment, course_assignment)
         serializer.save(
-            assignment=assignment,
             course_assignment=course_assignment,
             enrollment=enrollment,
             instrument=resolve_instrument(enrollment, course_assignment),
@@ -259,9 +239,7 @@ class ActivityProgressViewSet(GenericViewSet):
         return self._cached_target
 
     def _get_or_create_progress(self, lock=False):
-        # Phase 2: progress is keyed by (course_assignment, enrollment). The legacy
-        # `assignment` FK is populated when an Assignment row exists (back-compat),
-        # null for late joiners.
+        # Phase 2: progress is keyed by (course_assignment, enrollment).
         course_assignment, enrollment = self._target()
         manager = ActivityProgress.objects
         if lock:
@@ -269,9 +247,6 @@ class ActivityProgressViewSet(GenericViewSet):
         return manager.get_or_create(
             course_assignment=course_assignment,
             enrollment=enrollment,
-            defaults={
-                "assignment": resolve_legacy_assignment(enrollment, course_assignment)
-            },
         )
 
     def get_object(self):

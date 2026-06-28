@@ -438,8 +438,12 @@ class CourseViewSet(
 
         try:
             with transaction.atomic():
-                Assignment.objects.filter(
-                    part__piece_id=parsed["piece_id"], enrollment__course=course
+                # Phase 2: unassigning a piece removes its CourseAssignments
+                # (GroupAssignments cascade). A piece with submissions is PROTECTed,
+                # which surfaces as the IntegrityError handled below -- same guard
+                # the per-student Assignment delete had.
+                CourseAssignment.objects.filter(
+                    piece_id=parsed["piece_id"], course=course
                 ).delete()
         except IntegrityError:
             logger.error(
