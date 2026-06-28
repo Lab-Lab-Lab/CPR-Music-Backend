@@ -173,9 +173,23 @@ This mirrors the phased discipline that worked for Phase 1.
      reads the populated `assignment` FK — both fine until step 8.
 
    **Step 7 COMPLETE** (student + teacher list/retrieve, submissions, activity-progress).
-8. ⬜ **Contract & drop** — once reads (incl. teacher) use `CourseAssignment`, stop writing
-   `Assignment`, then drop `Submission.assignment` / `ActivityProgress.assignment` / the `Assignment`
-   model, and add the `unique(course_assignment, enrollment)` constraints to Submission/ActivityProgress.
+8. 🔶 **Contract & drop** — IN PROGRESS. **Reads + writes off Assignment DONE** (Assignment is now
+   dead — neither read nor written for new data):
+   - Repointed reads: `GroupSerializer.get_members` → `GroupAssignment`; `TeacherSubmissionViewSet.recent`
+     + serializer → the submission's own course_assignment/enrollment/instrument/part (frontend reads
+     only `assignment.enrollment.user.name` there); `ActivityViewSet` distinct-activity list → `CourseAssignment`.
+   - Per-piece instrument override moved to **`CourseAssignment.instrument`** (mig 0040, nullable);
+     `change_piece_instrument` sets it, `resolve_instrument` prefers it. (Restores the override the
+     step-7 read flip had stopped honoring.)
+   - **Stopped writing Assignment:** `assign_one_piece_activity`/`assign_telephone_fixed` create only
+     `CourseAssignment` (+ `GroupAssignment`); assign endpoints return a count (frontend ignores the body).
+   - **REMAINING (destructive, gated on review):** add `unique(course_assignment, enrollment)` to
+     `ActivityProgress`; remove `resolve_legacy_assignment` + the `assignment=` write in
+     `SubmissionViewSet.perform_create`; drop the dead `AssignmentViewSet` teacher retrieve/update/notation
+     actions; drop `Submission.assignment` + `ActivityProgress.assignment` FKs; drop the `Assignment`
+     model + dead serializers (`AssignmentSerializer`/`AssignmentViewSetSerializer`/`AssignmentInstrument`/
+     `NotationAssignment`). Note: dropping the Assignment rows is safe (fully backfilled into
+     CourseAssignment); ActivityProgress/Submission rows are NOT deleted (only their redundant FK column).
 
 ### Frontend contract surface (verified against `~/GithubOrgs/espadonne/CPR-Music`)
 
