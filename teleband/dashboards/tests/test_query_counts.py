@@ -12,10 +12,13 @@ from django.test.utils import CaptureQueriesContext
 from django.db import connection
 from django.test import Client
 
-from teleband.assignments.tests.factories import AssignmentFactory
+from teleband.assignments.models import CourseAssignment
+from teleband.assignments.tests.factories import ActivityFactory
+from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
 from teleband.musics.tests.factories import PartFactory, PieceFactory
 from teleband.submissions.models import SubmissionAttachment
 from teleband.submissions.tests.factories import SubmissionFactory
+from teleband.users.tests.factories import RoleFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -25,19 +28,34 @@ MAX_QUERIES = 25
 
 
 def test_csv_export_is_constant_query_count():
-    # Add some assignments that exercise the nested (has-submissions) branch on
-    # top of the seeded rows that exercise the empty branch.
+    # Phase 2: rows are (student, CourseAssignment) pairs. Build a course with
+    # students, course assignments, and submissions to exercise both the
+    # has-submissions and the unsubmitted branches.
+    course = CourseFactory()
+    student_role = RoleFactory(name="Student")
     piece = PieceFactory()
-    for _ in range(10):
+    students = [EnrollmentFactory(course=course, role=student_role) for _ in range(5)]
+    for _ in range(4):
         part = PartFactory(piece=piece)
-        assignment = AssignmentFactory(part=part, piece=piece)
-        submission = SubmissionFactory(assignment=assignment)
-        SubmissionAttachment.objects.create(submission=submission, file="a.wav")
+        activity = ActivityFactory(part_type=part.part_type)
+        ca = CourseAssignment.objects.create(
+            course=course, activity=activity, piece=piece
+        )
+        for enrollment in students[:2]:
+            submission = SubmissionFactory(
+                course_assignment=ca,
+                enrollment=enrollment,
+                instrument=enrollment.instrument,
+                part=part,
+            )
+            SubmissionAttachment.objects.create(submission=submission, file="a.wav")
 
     client = Client()
     with CaptureQueriesContext(connection) as ctx:
         response = client.get("/dashboards/export/csv/")
     assert response.status_code == 200
+    # 5 students x 4 course assignments = 20 per-student rows in the body.
+    assert response.content.decode().count("\n") >= 20
 
     n = len(ctx.captured_queries)
     assert n <= MAX_QUERIES, (
