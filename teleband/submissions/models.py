@@ -158,6 +158,15 @@ class ActivityProgress(models.Model):
     class Meta:
         verbose_name = "Activity Progress"
         verbose_name_plural = "Activity Progress"
+        constraints = [
+            # Phase 2: one progress row per student per CourseAssignment. NULLs are
+            # distinct in Postgres/SQLite, so legacy rows that never backfilled a
+            # course_assignment don't collide.
+            models.UniqueConstraint(
+                fields=["course_assignment", "enrollment"],
+                name="unique_activity_progress",
+            )
+        ]
 
     def __str__(self):
         # assignment is nullable in Phase 2 (late joiners); fall back to the

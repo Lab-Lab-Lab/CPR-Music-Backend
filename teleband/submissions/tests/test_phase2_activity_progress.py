@@ -4,6 +4,7 @@ import importlib
 
 import pytest
 from django.apps import apps as global_apps
+from django.db import IntegrityError
 from rest_framework.test import APIClient
 
 from teleband.assignments.models import CourseAssignment
@@ -14,6 +15,13 @@ from teleband.submissions.models import ActivityProgress
 from teleband.users.tests.factories import RoleFactory
 
 pytestmark = pytest.mark.django_db
+
+
+def test_activity_progress_unique_per_course_assignment_and_enrollment():
+    _, enrollment, ca = _assignment_with_ca()
+    ActivityProgress.objects.create(course_assignment=ca, enrollment=enrollment)
+    with pytest.raises(IntegrityError):
+        ActivityProgress.objects.create(course_assignment=ca, enrollment=enrollment)
 
 
 def _assignment_with_ca():
