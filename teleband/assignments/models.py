@@ -110,6 +110,14 @@ class CourseAssignment(models.Model):
     piece_plan = models.ForeignKey(
         PiecePlan, on_delete=models.PROTECT, null=True, blank=True
     )
+    # Course-level per-piece instrument override (set by change_piece_instrument).
+    # Null means each student resolves their own instrument from their enrollment.
+    instrument = models.ForeignKey(
+        "instruments.Instrument",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
     deadline = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -202,9 +202,13 @@ class PiecePlanSerializer(serializers.ModelSerializer):
         # }
 
 
-def resolve_instrument(enrollment):
-    """The instrument a student uses: their enrollment instrument, else their
-    user instrument (the Phase 1 / dual-write fallback, kept per the design)."""
+def resolve_instrument(enrollment, course_assignment=None):
+    """The instrument a student uses for a CourseAssignment: the course-level
+    per-piece override (``CourseAssignment.instrument``, set by
+    change_piece_instrument) if present, else their enrollment instrument, else
+    their user instrument."""
+    if course_assignment is not None and course_assignment.instrument_id:
+        return course_assignment.instrument
     return enrollment.instrument or enrollment.user.instrument
 
 
@@ -275,7 +279,7 @@ class CourseAssignmentReadSerializer(serializers.Serializer):
         # null/empty, while the piece/activity/part fields are fully populated.
         enrollment = self.context["enrollment"]
         activity = ca.activity
-        instrument = resolve_instrument(enrollment) if enrollment else None
+        instrument = resolve_instrument(enrollment, ca) if enrollment else None
         part = self._part_for(ca)
         submissions = self._submissions_for(ca, enrollment)
         group = self._group_for(ca, enrollment)
@@ -311,7 +315,7 @@ class CourseAssignmentRetrieveSerializer(serializers.Serializer):
 
     def to_representation(self, ca):
         enrollment = self.context["enrollment"]
-        instrument = resolve_instrument(enrollment)
+        instrument = resolve_instrument(enrollment, ca)
         part = Part.for_activity(ca.activity, ca.piece)
         submissions = CourseAssignmentReadSerializer.submissions_for(ca, enrollment)
         group_assignment = CourseAssignmentReadSerializer.group_assignment_for(

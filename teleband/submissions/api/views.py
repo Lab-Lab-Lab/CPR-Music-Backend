@@ -104,7 +104,7 @@ class SubmissionViewSet(
             assignment=assignment,
             course_assignment=course_assignment,
             enrollment=enrollment,
-            instrument=resolve_instrument(enrollment),
+            instrument=resolve_instrument(enrollment, course_assignment),
             part=Part.for_activity(course_assignment.activity, course_assignment.piece),
         )
 

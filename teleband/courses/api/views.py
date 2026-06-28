@@ -36,6 +36,7 @@ from teleband.courses.models import Enrollment, Course
 from teleband.assignments.models import (
     Assignment,
     Activity,
+    CourseAssignment,
     PiecePlan,
     Curriculum,
     AssignmentGroup,
@@ -482,8 +483,10 @@ class CourseViewSet(
         instrument = Instrument.objects.get(pk=instrument_id)
         piece = Piece.objects.get(pk=piece_id)
 
-        # One UPDATE for the whole piece instead of a save() per assignment.
-        Assignment.objects.filter(piece=piece, enrollment__course=course).update(
+        # Phase 2: the per-piece instrument override lives on CourseAssignment
+        # (course-level, applied to every student for that piece). One UPDATE
+        # across the piece's CourseAssignments; resolve_instrument prefers it.
+        CourseAssignment.objects.filter(piece=piece, course=course).update(
             instrument=instrument
         )
 

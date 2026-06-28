@@ -5,7 +5,7 @@ from django.test.utils import CaptureQueriesContext
 from django.db import connection
 from rest_framework.test import APIClient
 
-from teleband.assignments.models import Assignment
+from teleband.assignments.models import CourseAssignment
 from teleband.assignments.tests.factories import ActivityFactory, AssignmentFactory
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
 from teleband.instruments.tests.factories import InstrumentFactory
@@ -25,13 +25,16 @@ def _build(num_students):
     for _ in range(num_students):
         part = PartFactory(piece=piece)
         enrollment = EnrollmentFactory(course=course, role=student_role)
+        activity = ActivityFactory(part_type=part.part_type)
         AssignmentFactory(
-            activity=ActivityFactory(part_type=part.part_type),
+            activity=activity,
             enrollment=enrollment,
             part=part,
             instrument=enrollment.instrument,
             piece=piece,
         )
+        # Phase 2: change_piece_instrument now updates CourseAssignment.instrument.
+        CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
     return course, teacher, piece
 
 
@@ -62,13 +65,43 @@ def test_change_instrument_query_count_constant_in_roster():
     )
 
 
-def test_change_instrument_updates_all_assignments():
+def test_change_instrument_updates_all_course_assignments():
     new_instrument = InstrumentFactory()
     course, teacher, piece = _build(4)
     _patch(course, teacher, piece, new_instrument)
     instruments = set(
-        Assignment.objects.filter(piece=piece, enrollment__course=course).values_list(
+        CourseAssignment.objects.filter(course=course, piece=piece).values_list(
             "instrument_id", flat=True
         )
     )
     assert instruments == {new_instrument.id}
+
+
+def test_change_instrument_flows_to_student_resolved_instrument():
+    """After the teacher overrides the piece's instrument, a student's list shows
+    that instrument (resolve_instrument prefers CourseAssignment.instrument)."""
+    new_instrument = InstrumentFactory()
+    course = CourseFactory(can_edit_instruments=True)
+    teacher = UserFactory()
+    EnrollmentFactory(user=teacher, course=course, role=RoleFactory(name="Teacher"))
+    piece = PieceFactory()
+    part = PartFactory(piece=piece)
+    activity = ActivityFactory(part_type=part.part_type)
+    student = EnrollmentFactory(course=course, role=RoleFactory(name="Student"))
+    AssignmentFactory(
+        activity=activity,
+        enrollment=student,
+        part=part,
+        instrument=student.instrument,
+        piece=piece,
+    )
+    CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
+
+    _patch(course, teacher, piece, new_instrument)
+
+    client = APIClient()
+    client.force_authenticate(user=student.user)
+    resp = client.get(f"/api/courses/{course.slug}/assignments/")
+    assert resp.status_code == 200, resp.content
+    row = resp.json()[piece.slug][0]
+    assert row["instrument"] == new_instrument.name
