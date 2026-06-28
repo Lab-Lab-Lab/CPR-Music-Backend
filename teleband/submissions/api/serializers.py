@@ -56,7 +56,8 @@ class ActivityProgressSerializer(serializers.ModelSerializer):
         model = ActivityProgress
         fields = [
             "id",
-            "assignment",
+            "course_assignment",
+            "enrollment",
             "current_step",
             "step_completions",
             "activity_logs",
