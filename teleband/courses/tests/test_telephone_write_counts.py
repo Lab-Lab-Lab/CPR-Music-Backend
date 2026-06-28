@@ -11,7 +11,6 @@ from django.test.utils import CaptureQueriesContext
 from django.db import connection
 
 from teleband.assignments.models import (
-    Assignment,
     AssignmentGroup,
     CourseAssignment,
     GroupAssignment,
@@ -65,7 +64,7 @@ def test_telephone_query_count_constant_in_roster():
     )
 
 
-def test_telephone_creates_one_group_membership_per_student_and_no_assignments():
+def test_telephone_creates_one_group_membership_per_student():
     num_students = NUM_ACTIVITIES * 4
     course, plan = _setup(num_students)
 
@@ -73,14 +72,13 @@ def test_telephone_creates_one_group_membership_per_student_and_no_assignments()
     created = assign_telephone_fixed(course, plan)
 
     # Phase 2: one GroupAssignment per student, one group per block of
-    # NUM_ACTIVITIES students, and NO per-student Assignment rows.
+    # NUM_ACTIVITIES students (no per-student Assignment rows exist).
     assert len(created) == num_students
     assert (
         AssignmentGroup.objects.count() - before_groups
         == num_students // NUM_ACTIVITIES
     )
     assert all(ga.group_id is not None for ga in created)
-    assert Assignment.objects.filter(piece_plan=plan).count() == 0
 
 
 def test_telephone_dual_writes_course_and_group_assignments():

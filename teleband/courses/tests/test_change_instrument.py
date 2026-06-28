@@ -6,7 +6,7 @@ from django.db import connection
 from rest_framework.test import APIClient
 
 from teleband.assignments.models import CourseAssignment
-from teleband.assignments.tests.factories import ActivityFactory, AssignmentFactory
+from teleband.assignments.tests.factories import ActivityFactory
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
 from teleband.instruments.tests.factories import InstrumentFactory
 from teleband.musics.tests.factories import PartFactory, PieceFactory
@@ -24,16 +24,9 @@ def _build(num_students):
     piece = PieceFactory()
     for _ in range(num_students):
         part = PartFactory(piece=piece)
-        enrollment = EnrollmentFactory(course=course, role=student_role)
+        EnrollmentFactory(course=course, role=student_role)
         activity = ActivityFactory(part_type=part.part_type)
-        AssignmentFactory(
-            activity=activity,
-            enrollment=enrollment,
-            part=part,
-            instrument=enrollment.instrument,
-            piece=piece,
-        )
-        # Phase 2: change_piece_instrument now updates CourseAssignment.instrument.
+        # Phase 2: change_piece_instrument updates CourseAssignment.instrument.
         CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
     return course, teacher, piece
 
@@ -88,13 +81,6 @@ def test_change_instrument_flows_to_student_resolved_instrument():
     part = PartFactory(piece=piece)
     activity = ActivityFactory(part_type=part.part_type)
     student = EnrollmentFactory(course=course, role=RoleFactory(name="Student"))
-    AssignmentFactory(
-        activity=activity,
-        enrollment=student,
-        part=part,
-        instrument=student.instrument,
-        piece=piece,
-    )
     CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
 
     _patch(course, teacher, piece, new_instrument)

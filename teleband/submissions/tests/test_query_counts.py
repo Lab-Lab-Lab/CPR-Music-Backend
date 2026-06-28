@@ -16,7 +16,6 @@ from teleband.assignments.models import CourseAssignment
 from teleband.assignments.tests.factories import (
     ActivityFactory,
     ActivityTypeFactory,
-    AssignmentFactory,
 )
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
 from teleband.instruments.tests.factories import InstrumentFactory
@@ -49,17 +48,9 @@ def _build_recent_scenario(num_students):
 
     for _ in range(num_students):
         enrollment = EnrollmentFactory(course=course, role=student_role)
-        assignment = AssignmentFactory(
-            activity=activity,
-            enrollment=enrollment,
-            part=part,
-            instrument=enrollment.instrument,
-            piece=piece,
-        )
-        # Phase 2: recent reads the submission's own fields; dual-populate them as
+        # Phase 2: recent reads the submission's own fields; populate them as
         # SubmissionViewSet.perform_create does.
         submission = SubmissionFactory(
-            assignment=assignment,
             course_assignment=ca,
             enrollment=enrollment,
             instrument=enrollment.instrument,

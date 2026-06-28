@@ -15,7 +15,6 @@ from rest_framework.test import APIClient
 from teleband.assignments.models import CourseAssignment, GroupAssignment
 from teleband.assignments.tests.factories import (
     ActivityFactory,
-    AssignmentFactory,
     AssignmentGroupFactory,
 )
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
@@ -29,9 +28,10 @@ from teleband.users.tests.factories import RoleFactory, UserFactory
 pytestmark = pytest.mark.django_db
 
 
-def _build_course(num_students, num_activities=3, group=None):
-    """Create a course with a teacher and ``num_students`` students, each with
-    one assignment per activity on a shared piece. Returns (course, teacher)."""
+def _build_course(num_students, num_activities=3):
+    """Create a course with a teacher and ``num_students`` students. The course has
+    one CourseAssignment per activity on a shared piece; every student has a
+    submission against each. Returns (course, teacher)."""
     teacher_role = RoleFactory(name="Teacher")
     student_role = RoleFactory(name="Student")
     course = CourseFactory()
@@ -48,24 +48,22 @@ def _build_course(num_students, num_activities=3, group=None):
     activities = [
         ActivityFactory(part_type=parts[i].part_type) for i in range(num_activities)
     ]
-    # Phase 2 teacher list reads CourseAssignment (one row per (course, activity,
-    # piece), not per student); dual-write them so the teacher path is exercised.
-    for activity in activities:
+    # Phase 2: one CourseAssignment per (course, activity, piece), not per student.
+    course_assignments = [
         CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
+        for activity in activities
+    ]
 
     for _ in range(num_students):
         enrollment = EnrollmentFactory(course=course, role=student_role)
-        for i, activity in enumerate(activities):
-            assignment = AssignmentFactory(
-                activity=activity,
-                enrollment=enrollment,
-                part=parts[i],
-                instrument=enrollment.instrument,
-                piece=piece,
-                group=group,
-            )
+        for i, ca in enumerate(course_assignments):
             # Some submitted work + attachments to exercise those prefetches.
-            submission = SubmissionFactory(assignment=assignment)
+            submission = SubmissionFactory(
+                course_assignment=ca,
+                enrollment=enrollment,
+                instrument=enrollment.instrument,
+                part=parts[i],
+            )
             SubmissionAttachment.objects.create(submission=submission, file="a.wav")
 
     return course, teacher
@@ -113,21 +111,12 @@ class TestAssignmentListQueryCounts:
                     part=part, transposition=InstrumentFactory().transposition
                 )
                 activity = ActivityFactory(part_type=part.part_type)
-                assignment = AssignmentFactory(
-                    activity=activity,
-                    enrollment=enrollment,
-                    part=part,
-                    instrument=enrollment.instrument,
-                    piece=piece,
-                )
-                # Phase 2 student list reads from CourseAssignment; dual-write it
-                # (as the assign helpers do) plus a matching submission so this
-                # test actually exercises the flipped read path's scaling.
+                # Phase 2 student list reads from CourseAssignment; a matching
+                # submission exercises the flipped read path's per-row scaling.
                 ca = CourseAssignment.objects.create(
                     course=course, activity=activity, piece=piece
                 )
                 SubmissionFactory(
-                    assignment=assignment,
                     course_assignment=ca,
                     enrollment=enrollment,
                     instrument=enrollment.instrument,
@@ -155,19 +144,12 @@ class TestAssignmentListQueryCounts:
             teacher = UserFactory()
             EnrollmentFactory(user=teacher, course=course, role=teacher_role)
             piece = PieceFactory()
-            enrollment = EnrollmentFactory(course=course, role=student_role)
+            EnrollmentFactory(course=course, role=student_role)
             for _ in range(num_activities):
                 part = PartFactory(piece=piece)
                 activity = ActivityFactory(part_type=part.part_type)
-                AssignmentFactory(
-                    activity=activity,
-                    enrollment=enrollment,
-                    part=part,
-                    instrument=enrollment.instrument,
-                    piece=piece,
-                )
-                # ActivityViewSet now reads CourseAssignment for the course's
-                # distinct activities; dual-write one per activity.
+                # ActivityViewSet reads CourseAssignment for the course's distinct
+                # activities; one CA per activity.
                 CourseAssignment.objects.create(
                     course=course, activity=activity, piece=piece
                 )

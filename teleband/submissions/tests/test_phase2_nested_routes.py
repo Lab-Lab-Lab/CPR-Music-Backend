@@ -10,7 +10,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from teleband.assignments.models import CourseAssignment
-from teleband.assignments.tests.factories import ActivityFactory, AssignmentFactory
+from teleband.assignments.tests.factories import ActivityFactory
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
 from teleband.musics.tests.factories import PartFactory, PieceFactory
 from teleband.submissions.models import ActivityProgress, Submission
@@ -39,8 +39,8 @@ def _client(enrollment):
 
 
 def test_late_joiner_can_submit_against_course_assignment():
-    """A student with no Assignment row submits against the CourseAssignment; the
-    submission is keyed by (course_assignment, enrollment) with a null assignment."""
+    """A late-enrolling student submits against the CourseAssignment; the submission
+    is keyed by (course_assignment, enrollment)."""
     course, piece, part, activity, ca = _course_with_ca()
     late = _student(course)
 
@@ -52,7 +52,6 @@ def test_late_joiner_can_submit_against_course_assignment():
     assert resp.status_code == 201, resp.content
 
     sub = Submission.objects.get(id=resp.data["id"])
-    assert sub.assignment_id is None
     assert sub.course_assignment_id == ca.id
     assert sub.enrollment_id == late.id
     assert sub.instrument_id == late.instrument_id
@@ -93,7 +92,8 @@ def test_late_joiner_activity_progress_keyed_by_enrollment():
     assert resp.status_code == 200, resp.content
 
     progress = ActivityProgress.objects.get(course_assignment=ca, enrollment=late)
-    assert progress.assignment_id is None
+    assert progress.course_assignment_id == ca.id
+    assert progress.enrollment_id == late.id
 
 
 def test_activity_progress_is_distinct_per_student():

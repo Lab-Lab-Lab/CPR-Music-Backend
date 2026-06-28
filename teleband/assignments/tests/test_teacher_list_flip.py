@@ -11,7 +11,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from teleband.assignments.models import CourseAssignment
-from teleband.assignments.tests.factories import ActivityFactory, AssignmentFactory
+from teleband.assignments.tests.factories import ActivityFactory
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
 from teleband.musics.tests.factories import PartFactory, PieceFactory
 from teleband.users.tests.factories import RoleFactory, UserFactory
@@ -25,19 +25,12 @@ def _teacher(course):
     return teacher
 
 
-def _assign(course, students, activity, piece, part):
-    """One CourseAssignment for (course, activity, piece) plus a per-student
-    Assignment for each student (the dual-write state)."""
-    ca = CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
-    for s in students:
-        AssignmentFactory(
-            activity=activity,
-            enrollment=s,
-            part=part,
-            instrument=s.instrument,
-            piece=piece,
-        )
-    return ca
+def _assign(course, activity, piece):
+    """One CourseAssignment for (course, activity, piece). Every enrolled student
+    is implicitly assigned it -- there are no per-student assignment rows."""
+    return CourseAssignment.objects.create(
+        course=course, activity=activity, piece=piece
+    )
 
 
 def _list(course, teacher):
@@ -51,17 +44,16 @@ def _list(course, teacher):
 def test_teacher_list_is_one_row_per_course_assignment_not_per_student():
     course = CourseFactory()
     teacher = _teacher(course)
-    students = [
+    # Multiple students enrolled: a per-student implementation would emit 4x rows.
+    for _ in range(4):
         EnrollmentFactory(course=course, role=RoleFactory(name="Student"))
-        for _ in range(4)
-    ]
     piece = PieceFactory()
     part1 = PartFactory(piece=piece)
     part2 = PartFactory(piece=piece)
     act1 = ActivityFactory(part_type=part1.part_type)
     act2 = ActivityFactory(part_type=part2.part_type)
-    ca1 = _assign(course, students, act1, piece, part1)
-    ca2 = _assign(course, students, act2, piece, part2)
+    ca1 = _assign(course, act1, piece)
+    ca2 = _assign(course, act2, piece)
 
     grouped = _list(course, teacher)
 
@@ -76,11 +68,11 @@ def test_teacher_list_is_one_row_per_course_assignment_not_per_student():
 def test_teacher_list_populates_getassignedpieces_fields():
     course = CourseFactory()
     teacher = _teacher(course)
-    student = EnrollmentFactory(course=course, role=RoleFactory(name="Student"))
+    EnrollmentFactory(course=course, role=RoleFactory(name="Student"))
     piece = PieceFactory()
     part = PartFactory(piece=piece)
     activity = ActivityFactory(part_type=part.part_type)
-    ca = _assign(course, [student], activity, piece, part)
+    ca = _assign(course, activity, piece)
 
     row = _list(course, teacher)[piece.slug][0]
 
@@ -103,15 +95,13 @@ def test_teacher_list_distinct_piece_activity_set_matches_assignments():
     collapsing per-student rows."""
     course = CourseFactory()
     teacher = _teacher(course)
-    students = [
+    for _ in range(3):
         EnrollmentFactory(course=course, role=RoleFactory(name="Student"))
-        for _ in range(3)
-    ]
     piece = PieceFactory()
     parts = [PartFactory(piece=piece) for _ in range(3)]
     activities = [ActivityFactory(part_type=p.part_type) for p in parts]
-    for activity, part in zip(activities, parts):
-        _assign(course, students, activity, piece, part)
+    for activity in activities:
+        _assign(course, activity, piece)
 
     grouped = _list(course, teacher)
     seen = {

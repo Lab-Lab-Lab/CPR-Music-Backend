@@ -10,7 +10,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from teleband.assignments.models import CourseAssignment, PiecePlan, PlannedActivity
-from teleband.assignments.tests.factories import ActivityFactory, AssignmentFactory
+from teleband.assignments.tests.factories import ActivityFactory
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
 from teleband.musics.tests.factories import PartFactory, PieceFactory
 from teleband.users.tests.factories import RoleFactory, UserFactory
@@ -24,7 +24,7 @@ def test_list_sorted_by_planned_activity_order():
     course = CourseFactory()
     teacher = UserFactory()
     EnrollmentFactory(user=teacher, course=course, role=teacher_role)
-    student = EnrollmentFactory(course=course, role=student_role)
+    EnrollmentFactory(course=course, role=student_role)
 
     piece = PieceFactory()
     plan = PiecePlan.objects.create(name="p", piece=piece)
@@ -39,18 +39,9 @@ def test_list_sorted_by_planned_activity_order():
         PlannedActivity.objects.create(piece_plan=plan, activity=activity, order=order)
         activities.append((activity, part))
 
-    # Create the assignments in REVERSE order so DB/creation order != plan order.
-    # The list now reads CourseAssignment; dual-write a CA per activity (carrying
-    # piece_plan so the plan-order annotation resolves) plus the legacy Assignment.
+    # Create the CourseAssignments in REVERSE order so DB/creation order != plan
+    # order (each carries piece_plan so the plan-order annotation resolves).
     for activity, part in reversed(activities):
-        AssignmentFactory(
-            activity=activity,
-            enrollment=student,
-            part=part,
-            instrument=student.instrument,
-            piece=piece,
-            piece_plan=plan,
-        )
         CourseAssignment.objects.create(
             course=course, activity=activity, piece=piece, piece_plan=plan
         )

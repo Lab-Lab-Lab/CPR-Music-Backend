@@ -12,7 +12,6 @@ from rest_framework.test import APIClient
 from teleband.assignments.models import CourseAssignment
 from teleband.assignments.tests.factories import (
     ActivityFactory,
-    AssignmentFactory,
     AssignmentGroupFactory,
     GroupAssignmentFactory,
 )
@@ -27,18 +26,12 @@ def _student(course):
     return EnrollmentFactory(course=course, role=RoleFactory(name="Student"))
 
 
-def _ca_with_assignment(course, enrollment):
-    """A CourseAssignment plus the matching legacy Assignment for `enrollment`."""
+def _assign_piece(course):
+    """One CourseAssignment for a fresh piece/activity in `course`. Every enrolled
+    student is implicitly assigned it -- there are no per-student rows."""
     piece = PieceFactory()
     part = PartFactory(piece=piece)
     activity = ActivityFactory(part_type=part.part_type)
-    AssignmentFactory(
-        activity=activity,
-        enrollment=enrollment,
-        part=part,
-        instrument=enrollment.instrument,
-        piece=piece,
-    )
     ca = CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
     return ca, piece
 
@@ -58,8 +51,8 @@ def _all_ids(grouped):
 def test_student_list_returns_course_assignment_ids_grouped_by_piece():
     course = CourseFactory()
     student = _student(course)
-    ca1, piece1 = _ca_with_assignment(course, student)
-    ca2, piece2 = _ca_with_assignment(course, student)
+    ca1, piece1 = _assign_piece(course)
+    ca2, piece2 = _assign_piece(course)
 
     grouped = _list(student)
 
@@ -71,7 +64,7 @@ def test_student_list_returns_course_assignment_ids_grouped_by_piece():
 def test_student_retrieve_resolves_course_assignment_by_id():
     course = CourseFactory()
     student = _student(course)
-    ca, piece = _ca_with_assignment(course, student)
+    ca, piece = _assign_piece(course)
 
     client = APIClient()
     client.force_authenticate(user=student.user)
@@ -84,8 +77,8 @@ def test_student_retrieve_resolves_course_assignment_by_id():
 
 def test_late_joiner_can_retrieve_course_assignment():
     course = CourseFactory()
-    early = _student(course)
-    ca, piece = _ca_with_assignment(course, early)
+    _student(course)  # early enrollee, assigned the piece below
+    ca, piece = _assign_piece(course)
     late = _student(course)
 
     client = APIClient()
@@ -97,11 +90,11 @@ def test_late_joiner_can_retrieve_course_assignment():
 
 def test_late_joiner_sees_course_assignments_without_assignment_rows():
     course = CourseFactory()
-    early = _student(course)
-    ca, piece = _ca_with_assignment(course, early)
+    _student(course)  # early enrollee
+    ca, piece = _assign_piece(course)
 
-    # A student who enrolls after the piece was assigned has NO Assignment row,
-    # but must still see the course's CourseAssignment (the correctness fix).
+    # A student who enrolls after the piece was assigned still sees the course's
+    # CourseAssignment -- membership is by enrollment, not per-student rows.
     late = _student(course)
     grouped = _list(late)
 
@@ -137,7 +130,7 @@ def test_grouped_course_assignments_are_scoped_to_their_enrollment():
     member = _student(course)
     outsider = _student(course)
 
-    normal_ca, normal_piece = _ca_with_assignment(course, member)
+    normal_ca, normal_piece = _assign_piece(course)
 
     # A telephone_fixed CourseAssignment scoped to `member` via GroupAssignment.
     grouped_piece = PieceFactory()

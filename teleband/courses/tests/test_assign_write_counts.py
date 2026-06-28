@@ -9,7 +9,7 @@ import pytest
 from django.test.utils import CaptureQueriesContext
 from django.db import connection
 
-from teleband.assignments.models import Assignment, CourseAssignment
+from teleband.assignments.models import CourseAssignment
 from teleband.assignments.tests.factories import ActivityFactory
 from teleband.courses.helper import assign_one_piece_activity
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
@@ -51,18 +51,12 @@ def test_assign_one_activity_query_count_constant_in_roster():
     )
 
 
-def test_assign_one_activity_creates_no_per_student_assignments():
-    # Phase 2: assigning creates a single course-level CourseAssignment and NO
-    # per-student Assignment rows (students are implicitly assigned).
+def test_assign_one_activity_creates_single_course_level_assignment():
+    # Phase 2: assigning creates a single course-level CourseAssignment; students
+    # are implicitly assigned, so there are no per-student rows.
     course, piece, activity = _setup(5)
     created = assign_one_piece_activity(course, piece, activity)
     assert len(created) == 1
-    assert (
-        Assignment.objects.filter(
-            activity=activity, piece=piece, enrollment__course=course
-        ).count()
-        == 0
-    )
     assert (
         CourseAssignment.objects.filter(
             course=course, activity=activity, piece=piece
@@ -82,14 +76,11 @@ def test_assign_one_activity_is_idempotent():
         ).count()
         == 1
     )
-    assert (
-        Assignment.objects.filter(piece=piece, enrollment__course=course).count() == 0
-    )
 
 
 def test_assign_one_activity_creates_single_course_assignment():
-    # Phase 2 dual-write: one CourseAssignment per (course, activity, piece)
-    # regardless of roster size, and idempotent on re-assign.
+    # Phase 2: one CourseAssignment per (course, activity, piece) regardless of
+    # roster size, and idempotent on re-assign.
     course, piece, activity = _setup(5)
     assign_one_piece_activity(course, piece, activity, piece_plan=None)
     assign_one_piece_activity(course, piece, activity, piece_plan=None)
