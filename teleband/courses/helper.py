@@ -1,9 +1,8 @@
 from teleband.courses.models import Enrollment, Course
-from teleband.musics.models import Piece, Part
+from teleband.musics.models import Piece
 from teleband.assignments.models import (
     Activity,
     ActivityType,
-    Assignment,
     AssignmentGroup,
     CourseAssignment,
     GroupAssignment,
@@ -22,48 +21,16 @@ def assign_all_piece_activities(course, piece, deadline=None):
 
 
 def assign_one_piece_activity(course, piece, activity, deadline=None, piece_plan=None):
-    # One row per (activity, enrollment, piece) -- the model's unique constraint.
-    # Create the missing ones in a single bulk_create instead of an
-    # update_or_create per student (which was 2 queries each and silently
-    # swallowed the constraint violation on re-assign). Students who already have
-    # the assignment are left untouched, matching the prior effective behavior.
-    # Phase 2 dual-write: the course-level row is the future source of truth; the
-    # per-student Assignment rows below remain until the read path is flipped.
-    CourseAssignment.objects.update_or_create(
+    # Phase 2: one CourseAssignment per (course, activity, piece) is the whole
+    # assignment -- every enrolled student is implicitly assigned it (resolved at
+    # read time). No per-student Assignment rows are created anymore.
+    course_assignment, _ = CourseAssignment.objects.update_or_create(
         course=course,
         activity=activity,
         piece=piece,
         defaults={"piece_plan": piece_plan, "deadline": deadline},
     )
-
-    part = Part.for_activity(activity, piece)
-    # NB: do NOT select_related("user") here. This helper is called from the live
-    # data migration assignments/0033, where eagerly selecting all user columns
-    # touches users.external_id before that column's migration has run. Enrollment
-    # instrument is enough; user is only read for the rare no-enrollment-instrument
-    # fallback below.
-    enrollments = Enrollment.objects.filter(
-        course=course, role__name="Student"
-    ).select_related("instrument")
-    already_assigned = set(
-        Assignment.objects.filter(
-            activity=activity, piece=piece, enrollment__course=course
-        ).values_list("enrollment_id", flat=True)
-    )
-    to_create = [
-        Assignment(
-            activity=activity,
-            enrollment=e,
-            instrument=e.instrument if e.instrument else e.user.instrument,
-            part=part,
-            piece=piece,
-            piece_plan=piece_plan,
-            deadline=deadline,
-        )
-        for e in enrollments
-        if e.id not in already_assigned
-    ]
-    return Assignment.objects.bulk_create(to_create)
+    return [course_assignment]
 
 
 def assign_piece_plan(course, piece_plan, deadline=None):
@@ -123,9 +90,8 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
     # groups and assignments are each written in a single bulk_create.
     piece = piece_plan.piece
     activities = list(piece_plan.activities.all())
-    part_by_activity = {a.id: Part.for_activity(a, piece) for a in activities}
 
-    # Phase 2 dual-write: one CourseAssignment per activity for the course, plus a
+    # Phase 2: one CourseAssignment per activity for the course, plus a
     # GroupAssignment per member restricting which student gets which activity.
     course_assignment_by_activity = {
         a.id: CourseAssignment.objects.update_or_create(
@@ -141,21 +107,12 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
         [AssignmentGroup(type="telephone_fixed") for _ in groups]
     )
 
-    to_create = []
+    # Phase 2: each student's telephone assignment is a GroupAssignment linking
+    # them to one activity's CourseAssignment within their group. No per-student
+    # Assignment rows; part/instrument resolve at read time.
     group_memberships = []
     for group, assignment_group in zip(groups, group_objs):
         for e, a in zip(group, activities):
-            to_create.append(
-                Assignment(
-                    activity=a,
-                    part=part_by_activity[a.id],
-                    enrollment=e,
-                    instrument=e.instrument if e.instrument else e.user.instrument,
-                    piece_plan=piece_plan,
-                    piece=piece,
-                    group=assignment_group,
-                )
-            )
             group_memberships.append(
                 GroupAssignment(
                     group=assignment_group,
@@ -163,8 +120,7 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
                     course_assignment=course_assignment_by_activity[a.id],
                 )
             )
-    GroupAssignment.objects.bulk_create(group_memberships, ignore_conflicts=True)
-    return Assignment.objects.bulk_create(to_create)
+    return GroupAssignment.objects.bulk_create(group_memberships, ignore_conflicts=True)
 
 
 def assign_curriculum(course, curriculum, deadline=None):

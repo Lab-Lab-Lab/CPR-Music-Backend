@@ -325,10 +325,11 @@ class CourseViewSet(
                     },
                 )
 
-            serializer = AssignmentSerializer(
-                assignments, many=True, context={"request": request}
+            # Phase 2: assign_* returns CourseAssignment/GroupAssignment rows; the
+            # frontend ignores this body (it refetches the list), so return a count.
+            return Response(
+                status=status.HTTP_200_OK, data={"assigned": len(assignments)}
             )
-            return Response(status=status.HTTP_200_OK, data=serializer.data)
 
     @action(detail=True, methods=["post"])
     def assign(self, request, **kwargs):
@@ -367,10 +368,10 @@ class CourseViewSet(
 
         assignments = assign_all_piece_activities(course, piece)
 
-        serializer = AssignmentSerializer(
-            assignments, many=True, context={"request": request}
-        )
-        return Response(status=status.HTTP_200_OK, data=serializer.data)
+        # Phase 2: assign_* now returns CourseAssignment/GroupAssignment rows, not
+        # per-student Assignments. The frontend ignores this body (it refetches the
+        # list), so return a simple count.
+        return Response(status=status.HTTP_200_OK, data={"assigned": len(assignments)})
 
     @action(detail=True, methods=["post"])
     def assign_curriculum(self, request, **kwargs):
@@ -411,10 +412,10 @@ class CourseViewSet(
 
         assignments = assign_curriculum(course, curriculum)
 
-        serializer = AssignmentSerializer(
-            assignments, many=True, context={"request": request}
-        )
-        return Response(status=status.HTTP_200_OK, data=serializer.data)
+        # Phase 2: assign_* now returns CourseAssignment/GroupAssignment rows, not
+        # per-student Assignments. The frontend ignores this body (it refetches the
+        # list), so return a simple count.
+        return Response(status=status.HTTP_200_OK, data={"assigned": len(assignments)})
 
     @action(detail=True, methods=["post"])
     def unassign(self, request, **kwargs):

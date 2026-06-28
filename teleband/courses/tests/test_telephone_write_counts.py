@@ -65,22 +65,22 @@ def test_telephone_query_count_constant_in_roster():
     )
 
 
-def test_telephone_creates_one_group_per_block_and_one_assignment_per_student():
+def test_telephone_creates_one_group_membership_per_student_and_no_assignments():
     num_students = NUM_ACTIVITIES * 4
     course, plan = _setup(num_students)
 
     before_groups = AssignmentGroup.objects.count()
     created = assign_telephone_fixed(course, plan)
 
-    # One assignment per student, one group per block of NUM_ACTIVITIES students.
+    # Phase 2: one GroupAssignment per student, one group per block of
+    # NUM_ACTIVITIES students, and NO per-student Assignment rows.
     assert len(created) == num_students
     assert (
         AssignmentGroup.objects.count() - before_groups
         == num_students // NUM_ACTIVITIES
     )
-    # Every assignment belongs to a telephone group and the plan's piece.
-    assert all(a.group_id is not None for a in created)
-    assert Assignment.objects.filter(piece_plan=plan).count() == num_students
+    assert all(ga.group_id is not None for ga in created)
+    assert Assignment.objects.filter(piece_plan=plan).count() == 0
 
 
 def test_telephone_dual_writes_course_and_group_assignments():

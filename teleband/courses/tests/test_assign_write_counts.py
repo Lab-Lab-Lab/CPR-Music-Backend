@@ -51,15 +51,23 @@ def test_assign_one_activity_query_count_constant_in_roster():
     )
 
 
-def test_assign_one_activity_creates_one_row_per_student():
+def test_assign_one_activity_creates_no_per_student_assignments():
+    # Phase 2: assigning creates a single course-level CourseAssignment and NO
+    # per-student Assignment rows (students are implicitly assigned).
     course, piece, activity = _setup(5)
     created = assign_one_piece_activity(course, piece, activity)
-    assert len(created) == 5
+    assert len(created) == 1
     assert (
         Assignment.objects.filter(
             activity=activity, piece=piece, enrollment__course=course
         ).count()
-        == 5
+        == 0
+    )
+    assert (
+        CourseAssignment.objects.filter(
+            course=course, activity=activity, piece=piece
+        ).count()
+        == 1
     )
 
 
@@ -67,13 +75,15 @@ def test_assign_one_activity_is_idempotent():
     course, piece, activity = _setup(5)
     assign_one_piece_activity(course, piece, activity)
     # Re-assigning the same piece activity must not duplicate or error.
-    second = assign_one_piece_activity(course, piece, activity)
-    assert second == []
+    assign_one_piece_activity(course, piece, activity)
     assert (
-        Assignment.objects.filter(
-            activity=activity, piece=piece, enrollment__course=course
+        CourseAssignment.objects.filter(
+            course=course, activity=activity, piece=piece
         ).count()
-        == 5
+        == 1
+    )
+    assert (
+        Assignment.objects.filter(piece=piece, enrollment__course=course).count() == 0
     )
 
 
