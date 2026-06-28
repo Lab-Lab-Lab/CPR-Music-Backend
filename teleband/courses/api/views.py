@@ -29,12 +29,10 @@ from .serializers import (
     EnrollmentInstrumentSerializer,
     RosterSerializer,
 )
-from teleband.assignments.api.serializers import AssignmentSerializer
 from teleband.users.api.serializers import UserSerializer
 
 from teleband.courses.models import Enrollment, Course
 from teleband.assignments.models import (
-    Assignment,
     Activity,
     CourseAssignment,
     PiecePlan,

@@ -1,7 +1,5 @@
 from collections import defaultdict
-from rest_framework import status
-from rest_framework.decorators import action
-from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, UpdateModelMixin
+from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from django.db.models import OuterRef, Q, Subquery
@@ -9,19 +7,13 @@ from django.db.models import OuterRef, Q, Subquery
 from django.shortcuts import get_object_or_404
 
 from .serializers import (
-    AssignmentViewSetSerializer,
-    AssignmentInstrumentSerializer,
-    AssignmentSerializer,
     CourseAssignmentReadSerializer,
     CourseAssignmentRetrieveSerializer,
 )
 from teleband.assignments.api.serializers import ActivitySerializer, PiecePlanSerializer
-from teleband.musics.api.serializers import PartTranspositionSerializer
 
 from teleband.assignments.models import (
-    Assignment,
     Activity,
-    AssignmentGroup,
     CourseAssignment,
     GroupAssignment,
     PlannedActivity,
@@ -68,110 +60,37 @@ class ActivityViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):
         return queryset
 
 
-class AssignmentViewSet(
-    RetrieveModelMixin, UpdateModelMixin, ListModelMixin, GenericViewSet
-):
-    serializer_class = AssignmentViewSetSerializer
-    queryset = Assignment.objects.all()
+class AssignmentViewSet(RetrieveModelMixin, ListModelMixin, GenericViewSet):
+    # Phase 2: list/retrieve are fully overridden and resolve from CourseAssignment;
+    # this queryset/serializer is only for router basename + DRF metadata.
+    serializer_class = CourseAssignmentReadSerializer
+    queryset = CourseAssignment.objects.all()
     lookup_field = "id"
     permission_classes = [TeacherUpdate]
 
-    def get_serializer_class(self):
-        if self.action in ["update", "partial_update"]:
-            return AssignmentInstrumentSerializer
-        elif self.action == "retrieve":
-            return AssignmentSerializer
-        return self.serializer_class
-
-    def _student_enrollment(self):
-        return self.request.user.enrollment_set.select_related("role", "course").get(
-            course__slug=self.kwargs["course_slug_slug"]
-        )
-
     def retrieve(self, request, *args, **kwargs):
-        # Phase 2: a student's single-assignment id is a CourseAssignment id;
-        # resolve it against their enrollment and return the legacy AssignmentSerializer
-        # shape. Teachers keep the per-student Assignment retrieve.
-        enrollment = self._student_enrollment()
-        if enrollment.role.name == "Student":
-            course_assignment = get_object_or_404(
-                CourseAssignment.objects.select_related(
-                    "activity",
-                    "activity__part_type",
-                    "activity__activity_type",
-                    "activity__activity_type__category",
-                    "piece",
-                ),
-                pk=self.kwargs["id"],
-                course=enrollment.course,
-            )
-            serializer = CourseAssignmentRetrieveSerializer(
-                course_assignment,
-                context={"request": request, "enrollment": enrollment},
-            )
-            return Response(serializer.data)
-        return super().retrieve(request, *args, **kwargs)
-
-    @action(detail=True)
-    def notation(self, request, *args, **kwargs):
-        course = Course.objects.get(slug=self.kwargs["course_slug_slug"])
-        assignment = self.get_object()
-
-        part_transposition = assignment.part.transpositions.get(
-            transposition=assignment.instrument.transposition
+        # Phase 2: the single-assignment id is a CourseAssignment id; resolve it
+        # against the requesting user's enrollment and return the legacy
+        # AssignmentSerializer shape.
+        enrollment = self.request.user.enrollment_set.select_related(
+            "role", "course"
+        ).get(course__slug=self.kwargs["course_slug_slug"])
+        course_assignment = get_object_or_404(
+            CourseAssignment.objects.select_related(
+                "activity",
+                "activity__part_type",
+                "activity__activity_type",
+                "activity__activity_type__category",
+                "piece",
+            ),
+            pk=self.kwargs["id"],
+            course=enrollment.course,
         )
-
-        serializer = PartTranspositionSerializer(
-            part_transposition, context=self.get_serializer_context()
+        serializer = CourseAssignmentRetrieveSerializer(
+            course_assignment,
+            context={"request": request, "enrollment": enrollment},
         )
         return Response(serializer.data)
-
-    def _optimized_queryset(self, base):
-        # Shared select_related/prefetch_related so the list serializer never
-        # triggers per-row queries. Covers every relation walked by
-        # AssignmentViewSetSerializer: activity tree, instrument, piece, and the
-        # full part -> piece/transposition/sample tree (PartSerializer), plus
-        # submissions and their attachments.
-        return base.select_related(
-            "activity",
-            "activity__part_type",
-            "activity__activity_type",
-            "activity__activity_type__category",
-            "instrument",
-            "instrument__transposition",
-            "piece",
-            "part",
-            "part__part_type",
-            "part__piece",
-            "part__piece__composer",
-            "group",
-        ).prefetch_related(
-            "submissions",
-            "submissions__attachments",
-            "part__transpositions__transposition",
-            "part__instrument_samples",
-        )
-
-    def get_queryset(self):
-        # One enrollment lookup (with its role) instead of a separate Course.get
-        # plus enrollment.get; filter assignments by the course slug directly.
-        slug = self.kwargs["course_slug_slug"]
-        role = (
-            self.request.user.enrollment_set.select_related("role")
-            .get(course__slug=slug)
-            .role
-        )
-
-        if role.name == "Student":
-            return self._optimized_queryset(
-                Assignment.objects.filter(
-                    enrollment__course__slug=slug, enrollment__user=self.request.user
-                )
-            )
-        if role.name == "Teacher":
-            return self._optimized_queryset(
-                Assignment.objects.filter(enrollment__course__slug=slug)
-            )
 
     # Fallback ordering by activity type name prefix, used when an assignment has
     # no PlannedActivity.order (shared by the student and teacher list paths).
