@@ -164,11 +164,15 @@ This mirrors the phased discipline that worked for Phase 1.
      `CourseAssignmentRetrieveSerializer`) pin field-for-field parity except `id`; query-count test
      updated to dual-write CAs; factory fixes (unique `UserFactory.username`, date-typed
      `CourseFactory` dates).
-   - **REMAINING (teacher):** `AssignmentViewSet.list`/`retrieve` for teachers still read per-student
-     `Assignment` (coherent — teachers get Assignment ids and use them consistently;
-     `TeacherSubmissionViewSet.recent` reads the still-populated `assignment` FK). Flipping the teacher
-     path is a **cardinality change** (per-student rows → per-CA rows) — needs a contract decision on
-     the teacher list shape before building.
+   - **Teacher list DONE:** flipped to one row per `CourseAssignment` (A rows, not A·S). Verified the
+     frontend teacher view (`components/teacher/course.js` → `getAssignedPieces`) only derives the
+     distinct `(piece, activity)` set per piece and the redux consumers of this endpoint are all
+     student-facing — so the cardinality collapse is contract-safe; per-student fields come back
+     null/empty (read serializer handles `enrollment=None`). Teacher `retrieve` still reads per-student
+     `Assignment` (single-object; not a cardinality issue) and `TeacherSubmissionViewSet.recent` still
+     reads the populated `assignment` FK — both fine until step 8.
+
+   **Step 7 COMPLETE** (student + teacher list/retrieve, submissions, activity-progress).
 8. ⬜ **Contract & drop** — once reads (incl. teacher) use `CourseAssignment`, stop writing
    `Assignment`, then drop `Submission.assignment` / `ActivityProgress.assignment` / the `Assignment`
    model, and add the `unique(course_assignment, enrollment)` constraints to Submission/ActivityProgress.
