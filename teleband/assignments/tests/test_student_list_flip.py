@@ -108,6 +108,30 @@ def test_late_joiner_sees_course_assignments_without_assignment_rows():
     assert _all_ids(grouped) == {ca.id}
 
 
+def test_group_members_payload_built_from_group_assignments():
+    """GroupSerializer.get_members (now reading GroupAssignment) lists the group's
+    members with their submission status for the member viewing the list."""
+    course = CourseFactory()
+    piece = PieceFactory()
+    part = PartFactory(piece=piece)
+    activity = ActivityFactory(part_type=part.part_type)
+    ca = CourseAssignment.objects.create(course=course, activity=activity, piece=piece)
+    group = AssignmentGroupFactory()
+    a = _student(course)
+    b = _student(course)
+    for enr in (a, b):
+        GroupAssignmentFactory(group=group, enrollment=enr, course_assignment=ca)
+
+    grouped = _list(a)
+    row = grouped[piece.slug][0]
+    members = row["group"]["members"]
+    by_id = {m["enrollment_id"]: m for m in members}
+    assert set(by_id) == {a.id, b.id}
+    assert by_id[a.id]["enrollment_username"] == a.user.username
+    assert by_id[a.id]["activity_type_name"] == activity.activity_type_name
+    assert all(m["assignment_submitted"] is False for m in members)
+
+
 def test_grouped_course_assignments_are_scoped_to_their_enrollment():
     course = CourseFactory()
     member = _student(course)

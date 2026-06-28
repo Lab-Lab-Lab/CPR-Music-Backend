@@ -12,7 +12,7 @@ from django.test.utils import CaptureQueriesContext
 from django.db import connection
 from rest_framework.test import APIClient
 
-from teleband.assignments.models import CourseAssignment
+from teleband.assignments.models import CourseAssignment, GroupAssignment
 from teleband.assignments.tests.factories import (
     ActivityFactory,
     AssignmentFactory,
@@ -188,35 +188,36 @@ class TestAssignmentListQueryCounts:
         )
 
     def test_grouped_assignments_constant_in_group_size(self):
-        """GroupSerializer.get_members must be memoized: query count must not
-        grow quadratically (or at all) with group membership size."""
-        teacher_role = RoleFactory(name="Teacher")
+        """GroupSerializer.get_members (now reading GroupAssignment) must be
+        memoized: a group member's list query count must not grow with group size.
+        Groups render only in a student member's list (the teacher list has no
+        enrollment), so authenticate as a member."""
         student_role = RoleFactory(name="Student")
 
         def build_group_course(group_size):
             course = CourseFactory()
-            teacher = UserFactory()
-            EnrollmentFactory(user=teacher, course=course, role=teacher_role)
             group = AssignmentGroupFactory()
             piece = PieceFactory()
+            part = PartFactory(piece=piece)
+            activity = ActivityFactory(part_type=part.part_type)
+            ca = CourseAssignment.objects.create(
+                course=course, activity=activity, piece=piece
+            )
+            members = []
             for _ in range(group_size):
-                part = PartFactory(piece=piece)
                 enrollment = EnrollmentFactory(course=course, role=student_role)
-                AssignmentFactory(
-                    activity=ActivityFactory(part_type=part.part_type),
-                    enrollment=enrollment,
-                    part=part,
-                    instrument=enrollment.instrument,
-                    piece=piece,
-                    group=group,
+                GroupAssignment.objects.create(
+                    group=group, enrollment=enrollment, course_assignment=ca
                 )
-            return course, teacher
+                members.append(enrollment)
+            # View as the first member.
+            return course, members[0].user
 
-        small_course, small_teacher = build_group_course(2)
-        large_course, large_teacher = build_group_course(15)
+        small_course, small_viewer = build_group_course(2)
+        large_course, large_viewer = build_group_course(15)
 
-        small = _count_list_queries(small_course, small_teacher)
-        large = _count_list_queries(large_course, large_teacher)
+        small = _count_list_queries(small_course, small_viewer)
+        large = _count_list_queries(large_course, large_viewer)
 
         assert small == large, (
             f"Grouped-assignment list query count grows with group size "

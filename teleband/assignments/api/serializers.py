@@ -44,28 +44,38 @@ class GroupSerializer(serializers.ModelSerializer):
     members = serializers.SerializerMethodField(method_name="get_members")
 
     def get_members(self, obj):
-        # Memoize per group.id in the shared serializer context: a group is
-        # referenced once per member assignment, so without this the membership
-        # query (and its per-member walks) ran O(M) times per group -> O(M^2)
-        # across the list. Now it runs once per distinct group. select_related/
-        # prefetch keep the per-member enrollment/user/activity/submissions
-        # walks off the per-row path; bool(submissions.all()) uses the prefetch
-        # cache instead of a COUNT query.
+        # Phase 2: group membership comes from GroupAssignment (was per-student
+        # Assignment.group). Memoize per group.id in the shared serializer context
+        # so this runs once per distinct group, not once per member row. One query
+        # for the memberships and one for which (course_assignment, enrollment)
+        # pairs have a submission keep this off the per-row N+1 path.
         cache = self.context.setdefault("_group_members", {})
         if obj.id not in cache:
-            assignments = (
-                Assignment.objects.filter(group=obj)
-                .select_related("enrollment__user", "activity")
-                .prefetch_related("submissions")
+            memberships = list(
+                GroupAssignment.objects.filter(group=obj).select_related(
+                    "enrollment__user", "course_assignment__activity"
+                )
+            )
+            submitted = set(
+                Submission.objects.filter(
+                    course_assignment_id__in=[
+                        m.course_assignment_id for m in memberships
+                    ],
+                    enrollment_id__in=[m.enrollment_id for m in memberships],
+                ).values_list("course_assignment_id", "enrollment_id")
             )
             cache[obj.id] = [
                 {
-                    "enrollment_id": a.enrollment.id,
-                    "enrollment_username": a.enrollment.user.username,
-                    "activity_type_name": a.activity.activity_type_name,
-                    "assignment_submitted": bool(a.submissions.all()),
+                    "enrollment_id": m.enrollment_id,
+                    "enrollment_username": m.enrollment.user.username,
+                    "activity_type_name": m.course_assignment.activity.activity_type_name,
+                    "assignment_submitted": (
+                        m.course_assignment_id,
+                        m.enrollment_id,
+                    )
+                    in submitted,
                 }
-                for a in assignments
+                for m in memberships
             ]
         return cache[obj.id]
 
