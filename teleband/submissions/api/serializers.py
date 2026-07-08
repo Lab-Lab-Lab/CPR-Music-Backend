@@ -1,6 +1,11 @@
 from rest_framework import serializers
 
-from teleband.submissions.models import Grade, Submission, SubmissionAttachment, ActivityProgress
+from teleband.submissions.models import (
+    Grade,
+    Submission,
+    SubmissionAttachment,
+    ActivityProgress,
+)
 
 # from teleband.assignments.api.serializers import AssignmentSerializer
 
@@ -51,7 +56,8 @@ class ActivityProgressSerializer(serializers.ModelSerializer):
         model = ActivityProgress
         fields = [
             "id",
-            "assignment",
+            "course_assignment",
+            "enrollment",
             "current_step",
             "step_completions",
             "activity_logs",

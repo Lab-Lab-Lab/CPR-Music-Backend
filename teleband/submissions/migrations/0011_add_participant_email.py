@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
             field=models.EmailField(
                 blank=True,
                 null=True,
-                help_text="Email from Qualtrics for survey matching"
+                help_text="Email from Qualtrics for survey matching",
             ),
         ),
     ]

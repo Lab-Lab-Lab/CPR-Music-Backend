@@ -9,6 +9,7 @@ from teleband.users.forms import UserChangeForm, UserCreationForm
 from teleband.users.models import Role, GroupInvitation
 from teleband.courses.models import Enrollment
 from teleband.users.models import InstrumentConfig
+
 User = get_user_model()
 
 
@@ -60,5 +61,6 @@ class UserAdmin(auth_admin.UserAdmin):
 class RoleAdmin(VersionAdmin):
     list_display = ("id", "name")
     search_fields = ("name",)
+
 
 admin.site.register(InstrumentConfig)

@@ -16,8 +16,7 @@ DEBUG = env.bool("DJANGO_DEBUG", default=False)
 
 # Allow Railway's domain and custom domains
 ALLOWED_HOSTS = env.list(
-    "DJANGO_ALLOWED_HOSTS",
-    default=["localhost", ".railway.app", ".up.railway.app"]
+    "DJANGO_ALLOWED_HOSTS", default=["localhost", ".railway.app", ".up.railway.app"]
 )
 
 # DATABASES
@@ -62,7 +61,9 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 # STATIC FILES (whitenoise)
 # ------------------------------------------------------------------------------
 INSTALLED_APPS = ["whitenoise.runserver_nostatic"] + INSTALLED_APPS  # noqa F405
-MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")  # After SecurityMiddleware
+MIDDLEWARE.insert(
+    1, "whitenoise.middleware.WhiteNoiseMiddleware"
+)  # After SecurityMiddleware
 
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 STATIC_URL = "/static/"
@@ -79,12 +80,10 @@ MEDIA_ROOT = env("MEDIA_ROOT", default="/app/mediafiles")
 # ------------------------------------------------------------------------------
 # Use console backend for development/testing (emails print to console)
 EMAIL_BACKEND = env(
-    "DJANGO_EMAIL_BACKEND",
-    default="django.core.mail.backends.console.EmailBackend"
+    "DJANGO_EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
 )
 DEFAULT_FROM_EMAIL = env(
-    "DJANGO_DEFAULT_FROM_EMAIL",
-    default="MusicCPR <noreply@musiccpr.org>"
+    "DJANGO_DEFAULT_FROM_EMAIL", default="MusicCPR <noreply@musiccpr.org>"
 )
 
 # ADMIN
@@ -97,9 +96,7 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "verbose": {
-            "format": "%(levelname)s %(asctime)s %(name)s %(message)s"
-        }
+        "verbose": {"format": "%(levelname)s %(asctime)s %(name)s %(message)s"}
     },
     "handlers": {
         "console": {
@@ -133,17 +130,13 @@ CORS_ALLOWED_ORIGIN_REGEXES = env.list(
         r"^https://.*\.railway\.app$",
         r"^http://localhost:\d+$",
         r"^http://127\.0\.0\.1:\d+$",
-    ]
+    ],
 )
 
 # Also allow specific origins if set
-CORS_ALLOWED_ORIGINS = env.list(
-    "CORS_ALLOWED_ORIGINS",
-    default=[]
-)
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 
 # CSRF trusted origins (needed for admin)
 CSRF_TRUSTED_ORIGINS = env.list(
-    "CSRF_TRUSTED_ORIGINS",
-    default=["https://*.railway.app", "https://*.vercel.app"]
+    "CSRF_TRUSTED_ORIGINS", default=["https://*.railway.app", "https://*.vercel.app"]
 )

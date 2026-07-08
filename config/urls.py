@@ -15,6 +15,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 def debug_media(request):
     """Diagnostic endpoint to check media files."""
     import subprocess
+
     result = {
         "MEDIA_ROOT": str(settings.MEDIA_ROOT),
         "MEDIA_ROOT_exists": os.path.exists(settings.MEDIA_ROOT),
@@ -29,7 +30,9 @@ def debug_media(request):
                 for f in filenames[:20]:  # Limit to first 20
                     files.append(os.path.join(root, f).replace(settings.MEDIA_ROOT, ""))
             result["files"] = files
-            result["file_count"] = sum(len(f) for _, _, f in os.walk(settings.MEDIA_ROOT))
+            result["file_count"] = sum(
+                len(f) for _, _, f in os.walk(settings.MEDIA_ROOT)
+            )
         except Exception as e:
             result["error"] = str(e)
     else:
@@ -39,9 +42,12 @@ def debug_media(request):
     teleband_media = os.path.join(os.getcwd(), "teleband", "media")
     result["teleband_media_exists"] = os.path.exists(teleband_media)
     if os.path.exists(teleband_media):
-        result["teleband_media_count"] = sum(len(f) for _, _, f in os.walk(teleband_media))
+        result["teleband_media_count"] = sum(
+            len(f) for _, _, f in os.walk(teleband_media)
+        )
 
     return JsonResponse(result)
+
 
 urlpatterns = [
     path("", TemplateView.as_view(template_name="pages/home.html"), name="home"),
@@ -68,9 +74,11 @@ urlpatterns = [
 # Serve media files - in production with S3 this is handled by S3,
 # but for Railway/local deployments we serve from filesystem
 # Note: static() only works with DEBUG=True, so we use serve() directly for non-S3 deployments
-if not hasattr(settings, 'DEFAULT_FILE_STORAGE') or 'S3' not in getattr(settings, 'DEFAULT_FILE_STORAGE', ''):
+if not hasattr(settings, "DEFAULT_FILE_STORAGE") or "S3" not in getattr(
+    settings, "DEFAULT_FILE_STORAGE", ""
+):
     urlpatterns += [
-        re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
+        re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
     ]
 
 if settings.DEBUG:

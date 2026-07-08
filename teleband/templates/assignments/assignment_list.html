@@ -69,7 +69,7 @@
 
   {% for assn in assignment_list %}
   <tbody>
-    {% if assn.submissions.all|length == 0 %}
+    {% if assn.submissions|length == 0 %}
     <tr>
       <td>{{ assn.id }}</td>
       <td>{{ assn.enrollment.course.id }}</td>
@@ -88,7 +88,7 @@
       <td colspan="8">N/A</td>
     </tr>
     {% else %}
-    {% for sub in assn.submissions.all %}
+    {% for sub in assn.submissions %}
     {% for att in sub.attachments.all %}
     <tr>
       <td>{{ assn.id }}</td>

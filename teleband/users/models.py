@@ -55,6 +55,9 @@ class InstrumentConfig(models.Model):
     description = models.CharField(max_length=100, null=True, blank=True)
     settings = models.JSONField(default=dict)
     user = models.ForeignKey(User, null=True, on_delete=models.CASCADE)
-    file = models.FileField(upload_to="instrument_config_samples/", null=True, blank=True)
+    file = models.FileField(
+        upload_to="instrument_config_samples/", null=True, blank=True
+    )
+
     def __str__(self):
         return self.name

@@ -5,7 +5,6 @@ from .models import (
     ActivityCategory,
     ActivityType,
     Activity,
-    Assignment,
     Curriculum,
     CurriculumEntry,
     PiecePlan,
@@ -33,29 +32,6 @@ class ActivityAdmin(VersionAdmin):
     list_filter = ("activity_type", "part_type")
 
 
-@admin.register(Assignment)
-class AssignmentAdmin(VersionAdmin):
-    list_display = (
-        "id",
-        "activity",
-        "enrollment",
-        "part",
-        # "deadline",
-        # "instrument",
-        # "created_at",
-    )
-    list_filter = (
-        "activity",
-        "piece",
-        # "deadline",
-        # "instrument",
-        # "created_at",
-    )
-    search_fields = ("activity__activity_type__name", "enrollment__user__username")
-    date_hierarchy = "created_at"
-    save_as = True
-
-
 class PiecePlanActivityInline(admin.TabularInline):
     model = PlannedActivity
     extra = 0
@@ -79,12 +55,6 @@ class PiecePlanAdmin(VersionAdmin):
     save_as = True
 
 
-class AssignmentInline(admin.TabularInline):
-    model = Assignment
-    extra = 0
-    ordering = ("-id",)
-
-
 @admin.register(AssignmentGroup)
 class AssignmentGroupAdmin(VersionAdmin):
     list_display = (
@@ -92,7 +62,6 @@ class AssignmentGroupAdmin(VersionAdmin):
         "type",
     )
     list_filter = ("type",)
-    inlines = (AssignmentInline,)
 
 
 # @admin.register(PlannedActivity)

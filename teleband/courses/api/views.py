@@ -29,13 +29,12 @@ from .serializers import (
     EnrollmentInstrumentSerializer,
     RosterSerializer,
 )
-from teleband.assignments.api.serializers import AssignmentSerializer
 from teleband.users.api.serializers import UserSerializer
 
 from teleband.courses.models import Enrollment, Course
 from teleband.assignments.models import (
-    Assignment,
     Activity,
+    CourseAssignment,
     PiecePlan,
     Curriculum,
     AssignmentGroup,
@@ -110,7 +109,15 @@ class EnrollmentViewSet(
             ]
             return self.queryset.filter(course__in=courses)
 
-        return self.queryset.filter(user=self.request.user)
+        # EnrollmentSerializer nests course->owner, instrument->transposition,
+        # role, and user (UserSerializer -> groups).
+        return (
+            self.queryset.filter(user=self.request.user)
+            .select_related(
+                "course__owner", "instrument__transposition", "role", "user"
+            )
+            .prefetch_related("course__owner__groups", "user__groups")
+        )
 
     def get_serializer_class(self):
         if self.action == "update" or self.action == "partial_update":
@@ -198,7 +205,10 @@ class CourseViewSet(
                                 break
                         response["created"].append(
                             User.objects.create_user(
-                                name=name, username=new_username, password=password, grade=grade
+                                name=name,
+                                username=new_username,
+                                password=password,
+                                grade=grade,
                             )
                         )
                 except User.DoesNotExist:
@@ -212,21 +222,28 @@ class CourseViewSet(
             role = Role.objects.get(name="Student")
             enrollments = collections.defaultdict(list)
 
-            for key in ["created", "existing"]:
-                for user in response[key]:
-                    try:
-                        enrollments["existing"].append(
-                            Enrollment.objects.get(user=user, course=course)
+            # Resolve existing enrollments in one query, then bulk_create the new
+            # ones instead of a get()+create() per user.
+            all_users = response["created"] + response["existing"]
+            existing_by_user = {
+                e.user_id: e
+                for e in Enrollment.objects.filter(course=course, user__in=all_users)
+            }
+            to_create = []
+            for user in all_users:
+                existing = existing_by_user.get(user.id)
+                if existing is not None:
+                    enrollments["existing"].append(existing)
+                else:
+                    to_create.append(
+                        Enrollment(
+                            user=user,
+                            course=course,
+                            instrument=user.instrument,
+                            role=role,
                         )
-                    except Enrollment.DoesNotExist:
-                        enrollments["created"].append(
-                            Enrollment.objects.create(
-                                user=user,
-                                course=course,
-                                instrument=user.instrument,
-                                role=role,
-                            )
-                        )
+                    )
+            enrollments["created"] = Enrollment.objects.bulk_create(to_create)
 
             response["created"] = UserSerializer(
                 response["created"], many=True, context={"request": request}
@@ -245,8 +262,14 @@ class CourseViewSet(
                 data={"users": response, "enrollments": enrollments},
             )
 
-        # must be a GET, respond with all enrollments for this class
-        course_enrollments = Enrollment.objects.filter(course=self.get_object())
+        # must be a GET, respond with all enrollments for this class.
+        # RosterSerializer walks user (-> groups), instrument -> transposition,
+        # and role, so pull them in one shot.
+        course_enrollments = (
+            Enrollment.objects.filter(course=self.get_object())
+            .select_related("user", "instrument__transposition", "role")
+            .prefetch_related("user__groups")
+        )
         serializer = RosterSerializer(
             course_enrollments, many=True, context={"request": request}
         )
@@ -300,10 +323,11 @@ class CourseViewSet(
                     },
                 )
 
-            serializer = AssignmentSerializer(
-                assignments, many=True, context={"request": request}
+            # Phase 2: assign_* returns CourseAssignment/GroupAssignment rows; the
+            # frontend ignores this body (it refetches the list), so return a count.
+            return Response(
+                status=status.HTTP_200_OK, data={"assigned": len(assignments)}
             )
-            return Response(status=status.HTTP_200_OK, data=serializer.data)
 
     @action(detail=True, methods=["post"])
     def assign(self, request, **kwargs):
@@ -342,10 +366,10 @@ class CourseViewSet(
 
         assignments = assign_all_piece_activities(course, piece)
 
-        serializer = AssignmentSerializer(
-            assignments, many=True, context={"request": request}
-        )
-        return Response(status=status.HTTP_200_OK, data=serializer.data)
+        # Phase 2: assign_* now returns CourseAssignment/GroupAssignment rows, not
+        # per-student Assignments. The frontend ignores this body (it refetches the
+        # list), so return a simple count.
+        return Response(status=status.HTTP_200_OK, data={"assigned": len(assignments)})
 
     @action(detail=True, methods=["post"])
     def assign_curriculum(self, request, **kwargs):
@@ -386,10 +410,10 @@ class CourseViewSet(
 
         assignments = assign_curriculum(course, curriculum)
 
-        serializer = AssignmentSerializer(
-            assignments, many=True, context={"request": request}
-        )
-        return Response(status=status.HTTP_200_OK, data=serializer.data)
+        # Phase 2: assign_* now returns CourseAssignment/GroupAssignment rows, not
+        # per-student Assignments. The frontend ignores this body (it refetches the
+        # list), so return a simple count.
+        return Response(status=status.HTTP_200_OK, data={"assigned": len(assignments)})
 
     @action(detail=True, methods=["post"])
     def unassign(self, request, **kwargs):
@@ -412,8 +436,12 @@ class CourseViewSet(
 
         try:
             with transaction.atomic():
-                Assignment.objects.filter(
-                    part__piece_id=parsed["piece_id"], enrollment__course=course
+                # Phase 2: unassigning a piece removes its CourseAssignments
+                # (GroupAssignments cascade). A piece with submissions is PROTECTed,
+                # which surfaces as the IntegrityError handled below -- same guard
+                # the per-student Assignment delete had.
+                CourseAssignment.objects.filter(
+                    piece_id=parsed["piece_id"], course=course
                 ).delete()
         except IntegrityError:
             logger.error(
@@ -458,9 +486,11 @@ class CourseViewSet(
         instrument = Instrument.objects.get(pk=instrument_id)
         piece = Piece.objects.get(pk=piece_id)
 
-        assignments = Assignment.objects.filter(piece=piece, enrollment__course=course)
-        for assignment in assignments:
-            assignment.instrument = instrument
-            assignment.save()
+        # Phase 2: the per-piece instrument override lives on CourseAssignment
+        # (course-level, applied to every student for that piece). One UPDATE
+        # across the piece's CourseAssignments; resolve_instrument prefers it.
+        CourseAssignment.objects.filter(piece=piece, course=course).update(
+            instrument=instrument
+        )
 
         return Response(status=status.HTTP_200_OK)

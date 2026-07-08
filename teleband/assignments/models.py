@@ -1,8 +1,7 @@
 from django.db import models
 
 from teleband.courses.models import Course, Enrollment
-from teleband.instruments.models import Instrument
-from teleband.musics.models import Part, PartType, Piece
+from teleband.musics.models import PartType, Piece
 
 
 class ActivityCategory(models.Model):
@@ -54,24 +53,6 @@ class PiecePlan(models.Model):
     piece = models.ForeignKey(Piece, on_delete=models.PROTECT)
     type = models.CharField(max_length=255, null=True, blank=True)
 
-    def assign(self, enrollment, instrument, deadline=None):
-        assignments = []
-        piece = self.piece
-        for activity in self.activities.all():
-            part = Part.for_activity(activity, piece)
-            assignments.append(
-                Assignment.objects.create(
-                    activity=activity,
-                    enrollment=enrollment,
-                    part=part,
-                    instrument=instrument,
-                    piece_plan=self,
-                    deadline=deadline,
-                    piece=self.piece,
-                )
-            )
-        return assignments
-
     def __str__(self):
         if self.type:
             return f"{self.name}: {self.piece.name} ({self.type})"
@@ -79,39 +60,73 @@ class PiecePlan(models.Model):
             return f"{self.name}: {self.piece.name} "
 
 
-class Assignment(models.Model):
+class AssignmentGroup(models.Model):
 
+    type = models.CharField(max_length=255, null=True, blank=True)
+
+
+class CourseAssignment(models.Model):
+    """What a course is assigned: one row per (course, activity, piece), instead of
+    one Assignment per enrolled student. Per-student data (instrument, part) is
+    resolved at read time and persisted on Submission. See docs/remodel_phase2_design.md.
+    """
+
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE, related_name="course_assignments"
+    )
     activity = models.ForeignKey(Activity, on_delete=models.PROTECT)
-    enrollment = models.ForeignKey(Enrollment, on_delete=models.PROTECT)
-    part = models.ForeignKey(Part, on_delete=models.PROTECT)
-    deadline = models.DateField(null=True, blank=True)
-    instrument = models.ForeignKey(Instrument, on_delete=models.PROTECT)
+    piece = models.ForeignKey(Piece, on_delete=models.PROTECT)
     piece_plan = models.ForeignKey(
         PiecePlan, on_delete=models.PROTECT, null=True, blank=True
     )
-    piece = models.ForeignKey(Piece, on_delete=models.PROTECT, null=True, blank=True)
-    group = models.ForeignKey(
-        "AssignmentGroup", on_delete=models.PROTECT, null=True, blank=True
+    # Course-level per-piece instrument override (set by change_piece_instrument).
+    # Null means each student resolves their own instrument from their enrollment.
+    instrument = models.ForeignKey(
+        "instruments.Instrument",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
     )
-
+    deadline = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        # FIXME: do this with https://docs.djangoproject.com/en/5.0/ref/models/options/#unique-together instead.
-        # nevermind, this may be deprecated
         constraints = [
             models.UniqueConstraint(
-                fields=["activity", "enrollment", "piece"], name="unique_assignment"
+                fields=["course", "activity", "piece"],
+                name="unique_course_assignment",
+            )
+        ]
+        indexes = [models.Index(fields=["course", "piece"])]
+
+    def __str__(self):
+        return f"{self.course.slug}: {self.activity_id} {self.piece}"
+
+
+class GroupAssignment(models.Model):
+    """Links a student (enrollment) to a specific CourseAssignment within a group,
+    for telephone_fixed plans where different students get different activities.
+    Normal plans need no GroupAssignment -- every enrolled student is implicitly
+    assigned every non-grouped CourseAssignment in their course."""
+
+    group = models.ForeignKey(
+        AssignmentGroup, on_delete=models.CASCADE, related_name="memberships"
+    )
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE)
+    course_assignment = models.ForeignKey(
+        CourseAssignment, on_delete=models.CASCADE, related_name="group_assignments"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["enrollment", "course_assignment"],
+                name="unique_group_assignment",
             )
         ]
 
     def __str__(self):
-        return f"[{self.enrollment.user.username}] {self.activity.id} {self.piece}"
-
-
-class AssignmentGroup(models.Model):
-
-    type = models.CharField(max_length=255, null=True, blank=True)
+        return f"{self.enrollment} -> {self.course_assignment} (group {self.group_id})"
 
 
 class PlannedActivity(models.Model):

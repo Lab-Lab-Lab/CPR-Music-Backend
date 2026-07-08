@@ -1,11 +1,11 @@
-from django.db import IntegrityError
 from teleband.courses.models import Enrollment, Course
-from teleband.musics.models import Piece, Part
+from teleband.musics.models import Piece
 from teleband.assignments.models import (
     Activity,
     ActivityType,
-    Assignment,
     AssignmentGroup,
+    CourseAssignment,
+    GroupAssignment,
     PiecePlan,
 )
 import random
@@ -21,25 +21,16 @@ def assign_all_piece_activities(course, piece, deadline=None):
 
 
 def assign_one_piece_activity(course, piece, activity, deadline=None, piece_plan=None):
-    assignments = []
-    part = Part.for_activity(activity, piece)
-    for e in Enrollment.objects.filter(course=course, role__name="Student"):
-        try:
-            # TODO is it reasonable to make this update_or_create?
-            assn, assn_created = Assignment.objects.update_or_create(
-                activity=activity,
-                enrollment=e,
-                instrument=e.instrument if e.instrument else e.user.instrument,
-                part=part,
-                piece=piece,
-                piece_plan=piece_plan,
-                deadline=deadline,
-            )
-            if assn_created:
-                assignments.append(assn)
-        except IntegrityError as e:
-            print(f"IntegrityError: {e}")
-    return assignments
+    # Phase 2: one CourseAssignment per (course, activity, piece) is the whole
+    # assignment -- every enrolled student is implicitly assigned it (resolved at
+    # read time). No per-student Assignment rows are created anymore.
+    course_assignment, _ = CourseAssignment.objects.update_or_create(
+        course=course,
+        activity=activity,
+        piece=piece,
+        defaults={"piece_plan": piece_plan, "deadline": deadline},
+    )
+    return [course_assignment]
 
 
 def assign_piece_plan(course, piece_plan, deadline=None):
@@ -75,7 +66,11 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
 
     # split the enrollments into groups of num_activities at random
     # and then assign the excess enrollments to the last group
-    enrollments = list(Enrollment.objects.filter(course=course, role__name="Student"))
+    enrollments = list(
+        Enrollment.objects.filter(course=course, role__name="Student").select_related(
+            "instrument"
+        )
+    )
     random.shuffle(enrollments)
     final_group = [] if excess_enrollments == 0 else enrollments[-excess_enrollments:]
     groups = [
@@ -89,29 +84,43 @@ def assign_telephone_fixed(course, piece_plan, deadline=None):
         final_group += used_enrollments[0 : num_activities - excess_enrollments]
         groups.append(final_group)
 
-    # create an assignment group for each group of enrollments
-    # and then assign each enrollment to an activity in the piece plan
-    # and add the assignment to the assignment group.
+    # create one AssignmentGroup per group of enrollments, then assign each
+    # enrollment to an activity in the piece plan within that group. Activities
+    # and their parts are resolved once (not per group/assignment), and the
+    # groups and assignments are each written in a single bulk_create.
     piece = piece_plan.piece
-    assignments = []
-    for group in groups:
-        assignment_group = AssignmentGroup.objects.create(type="telephone_fixed")
-        group_assignments = []
-        for e, a in zip(group, piece_plan.activities.all()):
-            part = Part.for_activity(a, piece)
-            group_assignments.append(
-                Assignment.objects.create(
-                    activity=a,
-                    part=part,
-                    enrollment=e,
-                    instrument=e.instrument if e.instrument else e.user.instrument,
-                    piece_plan=piece_plan,
-                    piece=piece,
+    activities = list(piece_plan.activities.all())
+
+    # Phase 2: one CourseAssignment per activity for the course, plus a
+    # GroupAssignment per member restricting which student gets which activity.
+    course_assignment_by_activity = {
+        a.id: CourseAssignment.objects.update_or_create(
+            course=course,
+            activity=a,
+            piece=piece,
+            defaults={"piece_plan": piece_plan, "deadline": deadline},
+        )[0]
+        for a in activities
+    }
+
+    group_objs = AssignmentGroup.objects.bulk_create(
+        [AssignmentGroup(type="telephone_fixed") for _ in groups]
+    )
+
+    # Phase 2: each student's telephone assignment is a GroupAssignment linking
+    # them to one activity's CourseAssignment within their group. No per-student
+    # Assignment rows; part/instrument resolve at read time.
+    group_memberships = []
+    for group, assignment_group in zip(groups, group_objs):
+        for e, a in zip(group, activities):
+            group_memberships.append(
+                GroupAssignment(
                     group=assignment_group,
+                    enrollment=e,
+                    course_assignment=course_assignment_by_activity[a.id],
                 )
             )
-        assignments += group_assignments
-    return assignments
+    return GroupAssignment.objects.bulk_create(group_memberships, ignore_conflicts=True)
 
 
 def assign_curriculum(course, curriculum, deadline=None):
