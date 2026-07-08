@@ -1,8 +1,5 @@
 from django.contrib import admin
-from django.utils.html import format_html
 from reversion.admin import VersionAdmin
-
-from teleband.submissions.models import Submission
 
 from .models import (
     ActivityCategory,
@@ -105,27 +102,6 @@ class CurriculumAdmin(VersionAdmin):
     save_as = True
 
 
-class SubmissionInline(admin.TabularInline):
-    model = Submission
-    extra = 0
-    fields = ("id", "enrollment", "instrument", "part", "index", "attachments_list")
-    readonly_fields = ("id", "attachments_list")
-
-    def attachments_list(self, obj):
-        if not obj.pk:
-            return "-"
-        attachments = obj.attachments.all()
-        if not attachments:
-            return "-"
-        links = []
-        for att in attachments:
-            url = att.file.url if att.file else ""
-            links.append(format_html('<a href="{}">{}</a>', url, att.file.name))
-        return format_html(", ".join(links))
-
-    attachments_list.short_description = "Attachments"
-
-
 @admin.register(CourseAssignment)
 class CourseAssignmentAdmin(VersionAdmin):
     list_display = (
@@ -141,4 +117,3 @@ class CourseAssignmentAdmin(VersionAdmin):
         "piece",
         "activity",
     )
-    inlines = (SubmissionInline,)
