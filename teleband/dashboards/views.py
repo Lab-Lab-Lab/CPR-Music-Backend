@@ -94,6 +94,7 @@ def _name(obj):
 
 class AssignmentListView(UserPassesTestMixin, generic.ListView):
     template_name = "assignments/assignment_list.html"
+    context_object_name = "assignment_list"
     paginate_by = 100
 
     def get_queryset(self):
