@@ -10,7 +10,7 @@ from django.views import generic
 from teleband.assignments.api.serializers import resolve_instrument
 from teleband.assignments.models import CourseAssignment, GroupAssignment
 from teleband.courses.models import Course, Enrollment
-from teleband.submissions.models import Submission
+from teleband.submissions.models import Submission, SubmissionAttachment
 
 
 def build_assignment_rows():
@@ -232,6 +232,12 @@ def research_data_view(request):
         .select_related("grade", "self_grade", "enrollment__user", "instrument")
         .order_by("submitted")
     )
+    attachments = SubmissionAttachment.objects.filter(
+        submission__course_assignment__course_id__in=course_ids
+    )
+    atts_by_sub = defaultdict(list)
+    for att in attachments:
+        atts_by_sub[att.submission_id].append(att.file.url if att.file else None)
 
     subs_by_ca = defaultdict(list)
     for sub in submissions:
@@ -244,31 +250,32 @@ def research_data_view(request):
     result = []
     for course in courses:
         course_data = {
+            "id": course.id,
             "name": course.name,
-            "owner": course.owner.get_full_name() or course.owner.username,
+            "owner": course.owner.name or course.owner.username,
             "assignments": [],
         }
         for ca in cas_by_course.get(course.id, []):
             assn_data = {
                 "id": ca.id,
                 "activity": str(ca.activity),
+                "category": ca.activity.category or "",
                 "piece": str(ca.piece),
                 "submissions": [],
             }
             for sub in subs_by_ca.get(ca.id, []):
                 assn_data["submissions"].append(
                     {
-                        "student": (
-                            sub.enrollment.user.get_full_name()
-                            or sub.enrollment.user.username
-                        )
+                        "id": sub.id,
+                        "student": sub.enrollment.user.id
                         if sub.enrollment
-                        else "Unknown",
+                        else None,
                         "instrument": str(sub.instrument) if sub.instrument else None,
                         "submitted": sub.submitted.strftime("%Y-%m-%d %H:%M"),
                         "content": sub.content,
                         "grade": _serialize_grade(sub.grade),
                         "self_grade": _serialize_grade(sub.self_grade),
+                        "attachments": atts_by_sub.get(sub.id, []),
                     }
                 )
             course_data["assignments"].append(assn_data)

@@ -64,6 +64,17 @@
   #loading {
     display: none;
   }
+  .flat-embed-container {
+    min-height: 200px;
+    margin: 0.25rem 0;
+  }
+  .flat-embed-container > div {
+    height: 200px;
+  }
+  audio {
+    max-width: 250px;
+    height: 32px;
+  }
 </style>
 {% endblock css %}
 
@@ -84,7 +95,7 @@
       <input type="checkbox" name="course" value="{{ course.id }}" data-slug="{{ course.slug }}">
       {{ course.name }}
       <span class="course-owner">
-        ({{ course.owner.get_full_name|default:course.owner.name }},
+        ({{ course.owner.name|default:course.owner.username }},
         {{ course.start_date }} &ndash; {{ course.end_date }})
       </span>
     </label>
@@ -100,7 +111,14 @@
   </div>
 </div>
 
+<div id="export-bar" style="display:none;" class="mb-3">
+  <button type="button" class="btn btn-success" id="download-zip">Download ZIP</button>
+  <span id="export-progress" class="ms-2 text-muted" style="display:none;"></span>
+</div>
+
 <div id="results-area"></div>
+
+<div id="flat-render-area" style="position:absolute;left:-9999px;top:0;width:800px;"></div>
 
 {% endblock content %}
 
@@ -108,6 +126,10 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   const checkboxes = () => document.querySelectorAll('input[name="course"]');
+  // Loaded data and embed registry, shared between render and export
+  let loadedCourses = [];
+  // Map of embedId -> { embed: Flat.Embed instance, meta: {courseId, assnId, studentId, subId} }
+  const embedRegistry = {};
 
   document.getElementById('select-all').addEventListener('click', function() {
     checkboxes().forEach(cb => cb.checked = true);
@@ -127,6 +149,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const results = document.getElementById('results-area');
     loading.style.display = 'block';
     results.style.display = 'none';
+    document.getElementById('export-bar').style.display = 'none';
 
     const params = new URLSearchParams();
     selected.forEach(id => params.append('course_ids', id));
@@ -138,13 +161,19 @@ document.addEventListener('DOMContentLoaded', function() {
     .then(data => {
       loading.style.display = 'none';
       results.style.display = 'block';
-      renderResults(data.courses);
+      loadedCourses = data.courses;
+      renderResults(loadedCourses);
+      if (loadedCourses.length > 0) {
+        document.getElementById('export-bar').style.display = 'block';
+      }
     })
     .catch(err => {
       loading.style.display = 'none';
       alert('Error loading data: ' + err);
     });
   });
+
+  // --- Utility helpers ---
 
   function esc(str) {
     const d = document.createElement('div');
@@ -161,6 +190,123 @@ document.addEventListener('DOMContentLoaded', function() {
     return parts.length ? esc(parts.join(' ')) : '<span class="no-data">--</span>';
   }
 
+  function formatGradeText(g) {
+    if (!g) return '';
+    const parts = [];
+    if (g.rhythm !== null) parts.push('R:' + g.rhythm);
+    if (g.tone !== null) parts.push('T:' + g.tone);
+    if (g.expression !== null) parts.push('E:' + g.expression);
+    return parts.join(' ');
+  }
+
+  function parseReflectionContent(content) {
+    if (!content) return null;
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed && (parsed.r !== undefined || parsed.t !== undefined || parsed.e !== undefined || parsed.reflection !== undefined)) {
+        return parsed;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function selfGradeText(sub) {
+    if (sub.self_grade) return formatGradeText(sub.self_grade);
+    const ref = parseReflectionContent(sub.content);
+    if (ref && (ref.r !== undefined || ref.t !== undefined || ref.e !== undefined)) {
+      const parts = [];
+      if (ref.r !== undefined && ref.r !== '') parts.push('R:' + ref.r);
+      if (ref.t !== undefined && ref.t !== '') parts.push('T:' + ref.t);
+      if (ref.e !== undefined && ref.e !== '') parts.push('E:' + ref.e);
+      return parts.join(' ');
+    }
+    return '';
+  }
+
+  function fileBasename(courseId, assnId, studentId, subId) {
+    return 'c' + courseId + '_a' + assnId + '_s' + studentId + '_sub' + subId;
+  }
+
+  function extFromUrl(url) {
+    try {
+      const path = new URL(url, window.location.origin).pathname;
+      const dot = path.lastIndexOf('.');
+      if (dot !== -1) return path.substring(dot);
+    } catch (e) {}
+    return '.bin';
+  }
+
+  // --- Flat.io embed management ---
+
+  const FLAT_EMBED_PARAMS = {
+    appId: '60a51c906bcde01fc75a3ad0',
+    layout: 'responsive',
+    branding: false,
+    themePrimary: '#450084',
+    controlsDisplay: false,
+    controlsPlay: false,
+    controlsFullscreen: false,
+    controlsZoom: false,
+    controlsPrint: false,
+    displayFirstLinePartsNames: false,
+    toolsetId: '64be80de738efff96cc27edd',
+  };
+
+  function initFlatEmbeds(queue) {
+    for (const item of queue) {
+      const el = document.getElementById(item.id);
+      if (!el) continue;
+      const embed = new Flat.Embed(el, {
+        score: 'blank',
+        embedParams: FLAT_EMBED_PARAMS,
+      });
+      embed.loadJSON(item.json);
+      embedRegistry[item.id] = { embed: embed, meta: item.meta };
+    }
+  }
+
+  // --- Rendering ---
+
+  function renderContentCell(assn, sub, embedId) {
+    const category = (assn.category || '').toLowerCase();
+
+    if (category === 'create' && sub.content) {
+      return '<div class="flat-embed-container"><div id="' + embedId + '"></div></div>';
+    }
+
+    if (category === 'perform' && sub.attachments && sub.attachments.length > 0) {
+      let audioHtml = '';
+      for (const url of sub.attachments) {
+        if (url) {
+          audioHtml += '<audio controls preload="metadata" src="' + esc(url) + '"></audio> ';
+        }
+      }
+      return audioHtml || esc(sub.content || '');
+    }
+
+    if (category === 'respond') {
+      const ref = parseReflectionContent(sub.content);
+      if (ref) {
+        return esc(ref.reflection || '');
+      }
+    }
+
+    return esc(sub.content || '');
+  }
+
+  function renderSelfGradeCell(sub) {
+    if (sub.self_grade) return formatGrade(sub.self_grade);
+    const ref = parseReflectionContent(sub.content);
+    if (ref && (ref.r !== undefined || ref.t !== undefined || ref.e !== undefined)) {
+      const parts = [];
+      if (ref.r !== undefined && ref.r !== '') parts.push('R:' + ref.r);
+      if (ref.t !== undefined && ref.t !== '') parts.push('T:' + ref.t);
+      if (ref.e !== undefined && ref.e !== '') parts.push('E:' + ref.e);
+      return parts.length ? esc(parts.join(' ')) : '<span class="no-data">--</span>';
+    }
+    return formatGrade(sub.self_grade);
+  }
+
   function renderResults(courses) {
     const results = document.getElementById('results-area');
     if (courses.length === 0) {
@@ -168,7 +314,13 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
+    // Clear previous embed registry
+    for (const key of Object.keys(embedRegistry)) delete embedRegistry[key];
+
+    let embedCounter = 0;
     let html = '';
+    const embedQueue = [];
+
     for (const course of courses) {
       html += '<div class="course-section">';
       html += '<h4>' + esc(course.name) + ' <small class="course-owner">(' + esc(course.owner) + ')</small></h4>';
@@ -197,6 +349,9 @@ document.addEventListener('DOMContentLoaded', function() {
           html += '</tr>';
         } else {
           for (const sub of assn.submissions) {
+            const embedId = 'flat-embed-' + (embedCounter++);
+            const category = (assn.category || '').toLowerCase();
+
             html += '<tr>';
             html += '<td>' + assn.id + '</td>';
             html += '<td>' + esc(assn.activity) + '</td>';
@@ -204,10 +359,20 @@ document.addEventListener('DOMContentLoaded', function() {
             html += '<td>' + esc(sub.student) + '</td>';
             html += '<td>' + esc(sub.instrument || '--') + '</td>';
             html += '<td>' + esc(sub.submitted) + '</td>';
-            html += '<td>' + esc(sub.content || '') + '</td>';
+            html += '<td>' + renderContentCell(assn, sub, embedId) + '</td>';
             html += '<td class="grade-cell">' + formatGrade(sub.grade) + '</td>';
-            html += '<td class="grade-cell">' + formatGrade(sub.self_grade) + '</td>';
+            html += '<td class="grade-cell">' + renderSelfGradeCell(sub) + '</td>';
             html += '</tr>';
+
+            if (category === 'create' && sub.content) {
+              try {
+                embedQueue.push({
+                  id: embedId,
+                  json: JSON.parse(sub.content),
+                  meta: { courseId: course.id, assnId: assn.id, studentId: sub.student, subId: sub.id },
+                });
+              } catch (e) {}
+            }
           }
         }
       }
@@ -215,7 +380,240 @@ document.addEventListener('DOMContentLoaded', function() {
       html += '</tbody></table></div>';
     }
     results.innerHTML = html;
+    initFlatEmbeds(embedQueue);
   }
+
+  // --- ZIP export ---
+
+  function setProgress(msg) {
+    const el = document.getElementById('export-progress');
+    if (msg) {
+      el.style.display = 'inline';
+      el.textContent = msg;
+    } else {
+      el.style.display = 'none';
+    }
+  }
+
+  function dataURLtoBlob(dataURL) {
+    const parts = dataURL.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const raw = atob(parts[1]);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  document.getElementById('download-zip').addEventListener('click', async function() {
+    const btn = this;
+    btn.disabled = true;
+    setProgress('Preparing export...');
+
+    try {
+      const zip = new JSZip();
+      const scoresFolder = zip.folder('scores');
+      const audioFolder = zip.folder('audio');
+
+      // --- 1. Render score PNGs ---
+      // scoreImages: fileBasename -> base64 (no data-url prefix)
+      const scoreImages = {};
+      const embedKeys = Object.keys(embedRegistry);
+      for (let i = 0; i < embedKeys.length; i++) {
+        const key = embedKeys[i];
+        const entry = embedRegistry[key];
+        setProgress('Rendering score ' + (i + 1) + '/' + embedKeys.length + '...');
+        try {
+          const png = await entry.embed.getPNG({ result: 'dataURL' });
+          const m = entry.meta;
+          const base = fileBasename(m.courseId, m.assnId, m.studentId, m.subId);
+          scoresFolder.file(base + '.png', dataURLtoBlob(png));
+          scoreImages[base] = png.split(',')[1]; // base64 for ExcelJS
+        } catch (e) {
+          console.warn('Failed to export score for ' + key, e);
+        }
+      }
+
+      // --- 2. Collect audio files and build file-name maps ---
+      const audioMap = {};
+      const audioJobs = [];
+      for (const course of loadedCourses) {
+        for (const assn of course.assignments) {
+          const category = (assn.category || '').toLowerCase();
+          if (category !== 'perform') continue;
+          for (const sub of assn.submissions) {
+            if (!sub.attachments || sub.attachments.length === 0) continue;
+            sub.attachments.forEach((url, idx) => {
+              if (!url) return;
+              const ext = extFromUrl(url);
+              const base = fileBasename(course.id, assn.id, sub.student, sub.id);
+              const name = base + (sub.attachments.length > 1 ? '_' + idx : '') + ext;
+              const mapKey = course.id + '-' + assn.id + '-' + sub.id + '-' + idx;
+              audioMap[mapKey] = name;
+              audioJobs.push({ url: url, name: name });
+            });
+          }
+        }
+      }
+
+      for (let i = 0; i < audioJobs.length; i++) {
+        setProgress('Downloading audio ' + (i + 1) + '/' + audioJobs.length + '...');
+        try {
+          const resp = await fetch(audioJobs[i].url);
+          const blob = await resp.blob();
+          audioFolder.file(audioJobs[i].name, blob);
+        } catch (e) {
+          console.warn('Failed to fetch audio: ' + audioJobs[i].url, e);
+        }
+      }
+
+      // --- 3. Build Excel workbook with embedded images ---
+      setProgress('Building spreadsheet...');
+      const wb = new ExcelJS.Workbook();
+      const IMG_WIDTH = 1056;  // 11 inches at 96 DPI
+      const IMG_PX_HEIGHT = 200; // image height in pixels
+      const IMG_HEIGHT = 155; // row height in points (~200px)
+      const CONTENT_COL = 6; // 0-based column index for Content
+
+      for (const course of loadedCourses) {
+        let sheetName = (course.name || 'Course ' + course.id).substring(0, 31);
+        let suffix = 2;
+        let candidate = sheetName;
+        while (wb.worksheets.some(ws => ws.name === candidate)) {
+          const sfx = ' (' + suffix + ')';
+          candidate = sheetName.substring(0, 31 - sfx.length) + sfx;
+          suffix++;
+        }
+        const ws = wb.addWorksheet(candidate);
+
+        ws.columns = [
+          { header: 'Assignment ID', key: 'assnId', width: 14 },
+          { header: 'Activity', key: 'activity', width: 22 },
+          { header: 'Piece', key: 'piece', width: 20 },
+          { header: 'Student ID', key: 'studentId', width: 12 },
+          { header: 'Instrument', key: 'instrument', width: 15 },
+          { header: 'Submitted', key: 'submitted', width: 18 },
+          { header: 'Content', key: 'content', width: 45 },
+          { header: 'Teacher Grade', key: 'teacherGrade', width: 15 },
+          { header: 'Self Grade', key: 'selfGrade', width: 15 },
+        ];
+
+        // Bold header row
+        ws.getRow(1).font = { bold: true };
+
+        for (const assn of course.assignments) {
+          if (assn.submissions.length === 0) {
+            ws.addRow({
+              assnId: assn.id, activity: assn.activity, piece: assn.piece,
+              studentId: '', instrument: '', submitted: '', content: '',
+              teacherGrade: '', selfGrade: '',
+            });
+            continue;
+          }
+          for (const sub of assn.submissions) {
+            const category = (assn.category || '').toLowerCase();
+            const base = fileBasename(course.id, assn.id, sub.student, sub.id);
+            let content = sub.content || '';
+
+            // Determine content value and optional hyperlink
+            let contentValue = sub.content || '';
+            let contentLink = null;
+
+            if (category === 'create' && sub.content) {
+              const fname = base + '.png';
+              contentValue = fname;
+              contentLink = 'scores/' + fname;
+            } else if (category === 'perform') {
+              if (sub.attachments && sub.attachments.length > 0) {
+                const names = sub.attachments.map((url, idx) => {
+                  const mapKey = course.id + '-' + assn.id + '-' + sub.id + '-' + idx;
+                  return audioMap[mapKey] || '';
+                }).filter(Boolean);
+                contentValue = names.join('; ');
+                if (names.length === 1) {
+                  contentLink = 'audio/' + names[0];
+                }
+              }
+            } else if (category === 'respond') {
+              const ref = parseReflectionContent(sub.content);
+              if (ref) contentValue = ref.reflection || '';
+            }
+
+            const row = ws.addRow({
+              assnId: assn.id,
+              activity: assn.activity,
+              piece: assn.piece,
+              studentId: sub.student,
+              instrument: sub.instrument || '',
+              submitted: sub.submitted,
+              content: contentValue,
+              teacherGrade: formatGradeText(sub.grade),
+              selfGrade: selfGradeText(sub),
+            });
+
+            // Turn content cell into a hyperlink to the file in the ZIP
+            if (contentLink) {
+              const contentCell = row.getCell('content');
+              contentCell.value = { text: contentValue, hyperlink: contentLink };
+              contentCell.font = { color: { argb: 'FF0563C1' }, underline: true };
+            }
+            // For perform with multiple attachments, add individual hyperlinks per line
+            if (category === 'perform' && !contentLink && sub.attachments && sub.attachments.length > 1) {
+              const names = sub.attachments.map((url, idx) => {
+                const mapKey = course.id + '-' + assn.id + '-' + sub.id + '-' + idx;
+                return audioMap[mapKey] || '';
+              }).filter(Boolean);
+              // ExcelJS only supports one hyperlink per cell, so link to first file
+              // and list all names as text
+              if (names.length > 0) {
+                const contentCell = row.getCell('content');
+                contentCell.value = { text: names.join('; '), hyperlink: 'audio/' + names[0] };
+                contentCell.font = { color: { argb: 'FF0563C1' }, underline: true };
+              }
+            }
+
+            // Embed score PNG into the Content cell
+            if (category === 'create' && scoreImages[base]) {
+              const imgId = wb.addImage({
+                base64: scoreImages[base],
+                extension: 'png',
+              });
+              // Position image over the Content cell (row.number is 1-based, addImage uses 0-based)
+              ws.addImage(imgId, {
+                tl: { col: CONTENT_COL, row: row.number - 1 },
+                ext: { width: IMG_WIDTH, height: IMG_PX_HEIGHT },
+              });
+              row.height = IMG_HEIGHT;
+            }
+          }
+        }
+      }
+
+      const xlsxBuf = await wb.xlsx.writeBuffer();
+      zip.file('research_export.xlsx', xlsxBuf);
+
+      // --- 4. Generate and download ZIP ---
+      setProgress('Generating ZIP...');
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'research_export.zip';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setProgress(null);
+    } catch (e) {
+      alert('Export failed: ' + e);
+      console.error(e);
+      setProgress(null);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 });
 </script>
 {% endblock inline_javascript %}
+
+{% block custom_javascript %}
+<script src="https://prod.flat-cdn.com/embed-js/v2.3.0/embed.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+{% endblock custom_javascript %}
