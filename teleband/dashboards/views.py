@@ -2,8 +2,9 @@ import csv
 from collections import defaultdict
 from types import SimpleNamespace
 
+from django.contrib.auth.decorators import user_passes_test
 from django.contrib.auth.mixins import UserPassesTestMixin
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.views import generic
 
 from teleband.assignments.api.serializers import resolve_instrument
@@ -188,3 +189,89 @@ def csv_view(request):
                     ]
                 )
     return response
+
+
+class ResearchDashboardView(UserPassesTestMixin, generic.TemplateView):
+    template_name = "dashboards/research.html"
+
+    def test_func(self):
+        return self.request.user.is_superuser
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["courses"] = (
+            Course.objects.select_related("owner").order_by("-start_date", "name")
+        )
+        return ctx
+
+
+def _serialize_grade(grade):
+    if grade is None:
+        return None
+    return {
+        "rhythm": grade.rhythm,
+        "tone": grade.tone,
+        "expression": grade.expression,
+    }
+
+
+@user_passes_test(lambda u: u.is_superuser)
+def research_data_view(request):
+    course_ids = request.GET.getlist("course_ids")
+    if not course_ids:
+        return JsonResponse({"courses": []})
+
+    courses = Course.objects.filter(id__in=course_ids).select_related("owner")
+    course_assignments = (
+        CourseAssignment.objects.filter(course_id__in=course_ids)
+        .select_related("activity", "activity__activity_type", "piece")
+        .order_by("course_id", "id")
+    )
+    submissions = (
+        Submission.objects.filter(course_assignment__course_id__in=course_ids)
+        .select_related("grade", "self_grade", "enrollment__user", "instrument")
+        .order_by("submitted")
+    )
+
+    subs_by_ca = defaultdict(list)
+    for sub in submissions:
+        subs_by_ca[sub.course_assignment_id].append(sub)
+
+    cas_by_course = defaultdict(list)
+    for ca in course_assignments:
+        cas_by_course[ca.course_id].append(ca)
+
+    result = []
+    for course in courses:
+        course_data = {
+            "name": course.name,
+            "owner": course.owner.get_full_name() or course.owner.username,
+            "assignments": [],
+        }
+        for ca in cas_by_course.get(course.id, []):
+            assn_data = {
+                "id": ca.id,
+                "activity": str(ca.activity),
+                "piece": str(ca.piece),
+                "submissions": [],
+            }
+            for sub in subs_by_ca.get(ca.id, []):
+                assn_data["submissions"].append(
+                    {
+                        "student": (
+                            sub.enrollment.user.get_full_name()
+                            or sub.enrollment.user.username
+                        )
+                        if sub.enrollment
+                        else "Unknown",
+                        "instrument": str(sub.instrument) if sub.instrument else None,
+                        "submitted": sub.submitted.strftime("%Y-%m-%d %H:%M"),
+                        "content": sub.content,
+                        "grade": _serialize_grade(sub.grade),
+                        "self_grade": _serialize_grade(sub.self_grade),
+                    }
+                )
+            course_data["assignments"].append(assn_data)
+        result.append(course_data)
+
+    return JsonResponse({"courses": result})

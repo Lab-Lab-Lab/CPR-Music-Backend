@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Research Dashboard - MusicCPR{% endblock title %}
+
+{% block css %}
+{{ block.super }}
+<style>
+  .course-select-panel {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    background: #f8f9fa;
+  }
+  .course-checkbox-list {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 0.5rem;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+  }
+  .course-checkbox-list label {
+    display: block;
+    padding: 0.35rem 0.5rem;
+    cursor: pointer;
+    border-radius: 0.25rem;
+  }
+  .course-checkbox-list label:hover {
+    background: #e9ecef;
+  }
+  .course-owner {
+    color: #6c757d;
+    font-size: 0.875em;
+  }
+  #results-area {
+    display: none;
+  }
+  .course-section {
+    margin-bottom: 2rem;
+  }
+  .course-section h4 {
+    border-bottom: 2px solid #0d6efd;
+    padding-bottom: 0.4rem;
+    margin-bottom: 1rem;
+  }
+  table.research-table {
+    width: 100%;
+    font-size: 0.85rem;
+  }
+  table.research-table th {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 1;
+  }
+  .grade-cell {
+    white-space: nowrap;
+  }
+  .no-data {
+    color: #6c757d;
+    font-style: italic;
+  }
+  #loading {
+    display: none;
+  }
+</style>
+{% endblock css %}
+
+{% block content %}
+<h2>Research Dashboard</h2>
+
+<div class="course-select-panel">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0">Select Courses</h5>
+    <div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="select-all">Select All</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="select-none">Clear</button>
+    </div>
+  </div>
+  <div class="course-checkbox-list">
+    {% for course in courses %}
+    <label>
+      <input type="checkbox" name="course" value="{{ course.id }}" data-slug="{{ course.slug }}">
+      {{ course.name }}
+      <span class="course-owner">
+        ({{ course.owner.get_full_name|default:course.owner.username }},
+        {{ course.start_date }} &ndash; {{ course.end_date }})
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+  <button type="button" class="btn btn-primary mt-3" id="load-data">Load Data</button>
+</div>
+
+<div id="loading">
+  <div class="d-flex align-items-center">
+    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+    Loading...
+  </div>
+</div>
+
+<div id="results-area"></div>
+
+{% endblock content %}
+
+{% block inline_javascript %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const checkboxes = () => document.querySelectorAll('input[name="course"]');
+
+  document.getElementById('select-all').addEventListener('click', function() {
+    checkboxes().forEach(cb => cb.checked = true);
+  });
+  document.getElementById('select-none').addEventListener('click', function() {
+    checkboxes().forEach(cb => cb.checked = false);
+  });
+
+  document.getElementById('load-data').addEventListener('click', function() {
+    const selected = Array.from(checkboxes()).filter(cb => cb.checked).map(cb => cb.value);
+    if (selected.length === 0) {
+      alert('Please select at least one course.');
+      return;
+    }
+
+    const loading = document.getElementById('loading');
+    const results = document.getElementById('results-area');
+    loading.style.display = 'block';
+    results.style.display = 'none';
+
+    const params = new URLSearchParams();
+    selected.forEach(id => params.append('course_ids', id));
+
+    fetch('{% url "dashboards:research_data" %}?' + params.toString(), {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(r => r.json())
+    .then(data => {
+      loading.style.display = 'none';
+      results.style.display = 'block';
+      renderResults(data.courses);
+    })
+    .catch(err => {
+      loading.style.display = 'none';
+      alert('Error loading data: ' + err);
+    });
+  });
+
+  function esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function formatGrade(g) {
+    if (!g) return '<span class="no-data">--</span>';
+    const parts = [];
+    if (g.rhythm !== null) parts.push('R:' + g.rhythm);
+    if (g.tone !== null) parts.push('T:' + g.tone);
+    if (g.expression !== null) parts.push('E:' + g.expression);
+    return parts.length ? esc(parts.join(' ')) : '<span class="no-data">--</span>';
+  }
+
+  function renderResults(courses) {
+    const results = document.getElementById('results-area');
+    if (courses.length === 0) {
+      results.innerHTML = '<p class="no-data">No data found for selected courses.</p>';
+      return;
+    }
+
+    let html = '';
+    for (const course of courses) {
+      html += '<div class="course-section">';
+      html += '<h4>' + esc(course.name) + ' <small class="course-owner">(' + esc(course.owner) + ')</small></h4>';
+
+      if (course.assignments.length === 0) {
+        html += '<p class="no-data">No assignments in this course.</p>';
+        html += '</div>';
+        continue;
+      }
+
+      html += '<table class="table table-sm table-bordered table-hover research-table">';
+      html += '<thead><tr>';
+      html += '<th>Assignment</th><th>Activity</th><th>Piece</th>';
+      html += '<th>Student</th><th>Instrument</th>';
+      html += '<th>Submitted</th><th>Content</th>';
+      html += '<th>Teacher Grade</th><th>Self Grade</th>';
+      html += '</tr></thead><tbody>';
+
+      for (const assn of course.assignments) {
+        if (assn.submissions.length === 0) {
+          html += '<tr>';
+          html += '<td>' + assn.id + '</td>';
+          html += '<td>' + esc(assn.activity) + '</td>';
+          html += '<td>' + esc(assn.piece) + '</td>';
+          html += '<td colspan="6" class="no-data">No submissions</td>';
+          html += '</tr>';
+        } else {
+          for (const sub of assn.submissions) {
+            html += '<tr>';
+            html += '<td>' + assn.id + '</td>';
+            html += '<td>' + esc(assn.activity) + '</td>';
+            html += '<td>' + esc(assn.piece) + '</td>';
+            html += '<td>' + esc(sub.student) + '</td>';
+            html += '<td>' + esc(sub.instrument || '--') + '</td>';
+            html += '<td>' + esc(sub.submitted) + '</td>';
+            html += '<td>' + esc(sub.content || '') + '</td>';
+            html += '<td class="grade-cell">' + formatGrade(sub.grade) + '</td>';
+            html += '<td class="grade-cell">' + formatGrade(sub.self_grade) + '</td>';
+            html += '</tr>';
+          }
+        }
+      }
+
+      html += '</tbody></table></div>';
+    }
+    results.innerHTML = html;
+  }
+});
+</script>
+{% endblock inline_javascript %}
