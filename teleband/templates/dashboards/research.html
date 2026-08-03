@@ -84,7 +84,7 @@
       <input type="checkbox" name="course" value="{{ course.id }}" data-slug="{{ course.slug }}">
       {{ course.name }}
       <span class="course-owner">
-        ({{ course.owner.get_full_name|default:course.owner.username }},
+        ({{ course.owner.get_full_name|default:course.owner.name }},
         {{ course.start_date }} &ndash; {{ course.end_date }})
       </span>
     </label>
