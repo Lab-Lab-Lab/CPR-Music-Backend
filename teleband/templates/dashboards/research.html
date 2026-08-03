@@ -335,7 +335,7 @@ document.addEventListener('DOMContentLoaded', function() {
       html += '<thead><tr>';
       html += '<th>Assignment</th><th>Activity</th><th>Piece</th>';
       html += '<th>Student</th><th>Instrument</th>';
-      html += '<th>Submitted</th>';
+      html += '<th>Submission ID</th><th>Submitted</th>';
       html += '<th>Teacher Grade</th><th>Self Grade</th><th>Content</th>';
       html += '</tr></thead><tbody>';
 
@@ -345,7 +345,7 @@ document.addEventListener('DOMContentLoaded', function() {
           html += '<td>' + assn.id + '</td>';
           html += '<td>' + esc(assn.activity) + '</td>';
           html += '<td>' + esc(assn.piece) + '</td>';
-          html += '<td colspan="6" class="no-data">No submissions</td>';
+          html += '<td colspan="7" class="no-data">No submissions</td>';
           html += '</tr>';
         } else {
           for (const sub of assn.submissions) {
@@ -358,6 +358,7 @@ document.addEventListener('DOMContentLoaded', function() {
             html += '<td>' + esc(assn.piece) + '</td>';
             html += '<td>' + esc(sub.student) + '</td>';
             html += '<td>' + esc(sub.instrument || '--') + '</td>';
+            html += '<td>' + sub.id + '</td>';
             html += '<td>' + esc(sub.submitted) + '</td>';
             html += '<td class="grade-cell">' + formatGrade(sub.grade) + '</td>';
             html += '<td class="grade-cell">' + renderSelfGradeCell(sub) + '</td>';
@@ -472,7 +473,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const IMG_WIDTH = 1056;  // 11 inches at 96 DPI
       const IMG_PX_HEIGHT = 200; // image height in pixels
       const IMG_HEIGHT = 155; // row height in points (~200px)
-      const CONTENT_COL = 8; // 0-based column index for Content
+      const CONTENT_COL = 9; // 0-based column index for Content
 
       for (const course of loadedCourses) {
         let sheetName = (course.name || 'Course ' + course.id).substring(0, 31);
@@ -491,6 +492,7 @@ document.addEventListener('DOMContentLoaded', function() {
           { header: 'Piece', key: 'piece', width: 20 },
           { header: 'Student ID', key: 'studentId', width: 12 },
           { header: 'Instrument', key: 'instrument', width: 15 },
+          { header: 'Submission ID', key: 'subId', width: 14 },
           { header: 'Submitted', key: 'submitted', width: 18 },
           { header: 'Teacher Grade', key: 'teacherGrade', width: 15 },
           { header: 'Self Grade', key: 'selfGrade', width: 15 },
@@ -504,7 +506,7 @@ document.addEventListener('DOMContentLoaded', function() {
           if (assn.submissions.length === 0) {
             ws.addRow({
               assnId: assn.id, activity: assn.activity, piece: assn.piece,
-              studentId: '', instrument: '', submitted: '', content: '',
+              studentId: '', instrument: '', subId: '', submitted: '', content: '',
               teacherGrade: '', selfGrade: '',
             });
             continue;
@@ -544,6 +546,7 @@ document.addEventListener('DOMContentLoaded', function() {
               piece: assn.piece,
               studentId: sub.student,
               instrument: sub.instrument || '',
+              subId: sub.id,
               submitted: sub.submitted,
               content: contentValue,
               teacherGrade: formatGradeText(sub.grade),
