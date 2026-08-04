@@ -237,7 +237,10 @@ def research_data_view(request):
     )
     atts_by_sub = defaultdict(list)
     for att in attachments:
-        atts_by_sub[att.submission_id].append(att.file.url if att.file else None)
+        if att.file:
+            atts_by_sub[att.submission_id].append(
+                {"id": att.id, "url": att.file.url}
+            )
 
     subs_by_ca = defaultdict(list)
     for sub in submissions:
@@ -282,3 +285,22 @@ def research_data_view(request):
         result.append(course_data)
 
     return JsonResponse({"courses": result})
+
+
+@user_passes_test(lambda u: u.is_superuser)
+def attachment_proxy_view(request, attachment_id):
+    """Proxy an attachment file through the server to avoid S3 CORS issues."""
+    from django.http import FileResponse, Http404
+
+    try:
+        att = SubmissionAttachment.objects.get(pk=attachment_id)
+    except SubmissionAttachment.DoesNotExist:
+        raise Http404
+
+    try:
+        f = att.file.open("rb")
+    except Exception:
+        raise Http404
+
+    filename = att.file.name.split("/")[-1] if "/" in att.file.name else att.file.name
+    return FileResponse(f, as_attachment=False, filename=filename)

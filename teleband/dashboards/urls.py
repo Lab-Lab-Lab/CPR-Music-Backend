@@ -4,6 +4,7 @@ from teleband.dashboards.views import (
     AssignmentListView,
     CourseListView,
     ResearchDashboardView,
+    attachment_proxy_view,
     csv_view,
     research_data_view,
 )
@@ -15,4 +16,9 @@ urlpatterns = [
     path("export/csv/", csv_view, name="export_csv"),
     path("research/", ResearchDashboardView.as_view(), name="research"),
     path("research/data/", research_data_view, name="research_data"),
+    path(
+        "research/attachment/<int:attachment_id>/",
+        attachment_proxy_view,
+        name="attachment_proxy",
+    ),
 ]

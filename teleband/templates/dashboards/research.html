@@ -227,6 +227,12 @@ document.addEventListener('DOMContentLoaded', function() {
     return 'c' + courseId + '_a' + assnId + '_s' + studentId + '_sub' + subId;
   }
 
+  const ATTACHMENT_PROXY_BASE = '{% url "dashboards:attachment_proxy" attachment_id=0 %}'.replace('/0/', '/');
+
+  function attachmentProxyUrl(att) {
+    return ATTACHMENT_PROXY_BASE + att.id + '/';
+  }
+
   function extFromUrl(url) {
     try {
       const path = new URL(url, window.location.origin).pathname;
@@ -276,9 +282,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (category === 'perform' && sub.attachments && sub.attachments.length > 0) {
       let audioHtml = '';
-      for (const url of sub.attachments) {
-        if (url) {
-          audioHtml += '<audio controls preload="metadata" src="' + esc(url) + '"></audio> ';
+      for (const att of sub.attachments) {
+        if (att && att.url) {
+          audioHtml += '<audio controls preload="metadata" src="' + esc(att.url) + '"></audio> ';
         }
       }
       return audioHtml || esc(sub.content || '');
@@ -443,14 +449,14 @@ document.addEventListener('DOMContentLoaded', function() {
           if (category !== 'perform') continue;
           for (const sub of assn.submissions) {
             if (!sub.attachments || sub.attachments.length === 0) continue;
-            sub.attachments.forEach((url, idx) => {
-              if (!url) return;
-              const ext = extFromUrl(url);
+            sub.attachments.forEach((att, idx) => {
+              if (!att || !att.id) return;
+              const ext = extFromUrl(att.url);
               const base = fileBasename(course.id, assn.id, sub.student, sub.id);
               const name = base + (sub.attachments.length > 1 ? '_' + idx : '') + ext;
               const mapKey = course.id + '-' + assn.id + '-' + sub.id + '-' + idx;
               audioMap[mapKey] = name;
-              audioJobs.push({ url: url, name: name });
+              audioJobs.push({ url: attachmentProxyUrl(att), name: name });
             });
           }
         }
