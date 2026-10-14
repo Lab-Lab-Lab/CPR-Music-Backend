@@ -187,6 +187,9 @@ LOGGING = {
             "maxBytes": 1024 * 1024 * 15,  # 15MB
             "backupCount": 10,
         },
+        "null": {
+            "class": "logging.NullHandler",
+        },
     },
     "root": {"level": "INFO", "handlers": ["console"]},
     "loggers": {
@@ -200,10 +203,12 @@ LOGGING = {
             "level": "ERROR",
             "propagate": True,
         },
+        # Bots hitting the ALB by IP send a Host header not in ALLOWED_HOSTS.
+        # Django already answers 400; logging these just buries real errors
+        # (and would trigger mail_admins if that's ever enabled).
         "django.security.DisallowedHost": {
-            "level": "ERROR",
-            "handlers": ["console"],
-            "propagate": True,
+            "handlers": ["null"],
+            "propagate": False,
         },
         "anymail": {
             "handlers": ["console", "applogfile"],

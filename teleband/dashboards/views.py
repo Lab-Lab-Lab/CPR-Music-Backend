@@ -199,8 +199,8 @@ class ResearchDashboardView(UserPassesTestMixin, generic.TemplateView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx["courses"] = (
-            Course.objects.select_related("owner").order_by("-start_date", "name")
+        ctx["courses"] = Course.objects.select_related("owner").order_by(
+            "-start_date", "name"
         )
         return ctx
 
@@ -238,9 +238,7 @@ def research_data_view(request):
     atts_by_sub = defaultdict(list)
     for att in attachments:
         if att.file:
-            atts_by_sub[att.submission_id].append(
-                {"id": att.id, "url": att.file.url}
-            )
+            atts_by_sub[att.submission_id].append({"id": att.id, "url": att.file.url})
 
     subs_by_ca = defaultdict(list)
     for sub in submissions:
@@ -270,9 +268,7 @@ def research_data_view(request):
                 assn_data["submissions"].append(
                     {
                         "id": sub.id,
-                        "student": sub.enrollment.user.id
-                        if sub.enrollment
-                        else None,
+                        "student": sub.enrollment.user.id if sub.enrollment else None,
                         "instrument": str(sub.instrument) if sub.instrument else None,
                         "submitted": sub.submitted.strftime("%Y-%m-%d %H:%M"),
                         "content": sub.content,
