@@ -1,0 +1,12 @@
+{% autoescape off %}Hello,
+
+You've been invited to take part in {{ study.name }} using MusicCPR.
+
+To get started, please complete this short consent form and questionnaire:
+
+{{ survey_url }}
+
+When you finish, you'll be taken to MusicCPR to set your password. Your username is {{ participant.user.username }}.
+
+Thank you!
+{% endautoescape %}
