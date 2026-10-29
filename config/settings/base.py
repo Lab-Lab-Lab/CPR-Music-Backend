@@ -93,6 +93,7 @@ LOCAL_APPS = [
     "teleband.musics",
     "teleband.submissions",
     "teleband.dashboards",
+    "teleband.research",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -314,6 +315,14 @@ INVITATIONS_ACCEPT_INVITE_AFTER_SIGNUP = env.bool(
 )
 INVITATIONS_GONE_ON_ACCEPT_ERROR = env.bool(
     "DJANGO_INVITATIONS_GONE_ON_ACCEPT_ERROR", False
+)
+
+
+# research surveys
+# ------------------------------------------------------------------------------
+# Where the Qualtrics end-of-survey redirect finally sends the user (frontend).
+RESEARCH_SURVEY_RETURN_URL = env(
+    "DJANGO_RESEARCH_SURVEY_RETURN_URL", default="http://localhost:3000/courses"
 )
 
 

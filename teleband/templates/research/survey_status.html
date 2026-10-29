@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Survey Status - MusicCPR{% endblock title %}
+
+{% block content %}
+<h1>Survey status</h1>
+<p class="text-muted">
+  Active studies only. Add studies, surveys and participants in the
+  <a href="{% url 'admin:research_study_changelist' %}">admin</a>.
+</p>
+
+{% for entry in studies %}
+  <h2 class="mt-4">{{ entry.study.name }}</h2>
+  {% if not entry.rows %}
+    <p class="text-muted">No participants yet.</p>
+  {% else %}
+  <div class="table-responsive">
+    <table class="table table-sm table-bordered align-middle">
+      <thead>
+        <tr>
+          <th>Participant</th>
+          <th>Start</th>
+          <th>Last login</th>
+          <th>Set up</th>
+          <th>Courses</th>
+          <th>Assignments</th>
+          {% for survey in entry.surveys %}
+            <th>{{ survey.title }}<br><small class="text-muted">day {{ survey.due_after_days }}</small></th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in entry.rows %}
+        <tr>
+          <td>{{ row.participant.user.name|default:row.participant.user.username }}<br><small class="text-muted">{{ row.participant.user.email }}</small></td>
+          <td>{{ row.participant.start_date }}</td>
+          <td>{{ row.participant.user.last_login|date:"Y-m-d"|default:"never" }}</td>
+          <td>{{ row.participant.user.onboarded_at|date:"Y-m-d"|default:"not yet" }}</td>
+          <td>{{ row.courses }}</td>
+          <td>{{ row.assignments }}</td>
+          {% for status, date in row.cells %}
+            {% if status == "done" %}
+              <td class="table-success">done {{ date }}</td>
+            {% elif status == "overdue" %}
+              <td class="table-warning">due {{ date }}</td>
+            {% else %}
+              <td class="text-muted">opens {{ date }}</td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% empty %}
+  <p>No active studies.</p>
+{% endfor %}
+{% endblock content %}

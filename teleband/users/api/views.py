@@ -33,6 +33,7 @@ from .serializers import (
     UserInstrumentConfigSerializer,
 )
 from teleband.courses.models import Enrollment, Course
+from teleband.research.models import due_surveys
 from teleband.users.models import InstrumentConfig
 from django.db.models import Q
 
@@ -86,6 +87,43 @@ class UserViewSet(RetrieveModelMixin, ListModelMixin, UpdateModelMixin, GenericV
     def me(self, request):
         serializer = UserSerializer(request.user, context={"request": request})
         return Response(status=status.HTTP_200_OK, data=serializer.data)
+
+    @action(detail=False, methods=["get", "post"])
+    def onboarding(self, request):
+        """First-time teacher setup checklist. GET reports progress; POST marks
+        setup finished, which requires a course with at least one student.
+        Surveys are reported but never required."""
+        user = request.user
+        course = (
+            Course.objects.filter(
+                enrollment__user=user, enrollment__role__name="Teacher"
+            )
+            .order_by("id")
+            .first()
+        )
+        student_count = (
+            Enrollment.objects.filter(course=course, role__name="Student").count()
+            if course
+            else 0
+        )
+
+        if request.method == "POST" and user.onboarded_at is None:
+            if not student_count:
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"detail": "Create a course and add students first."},
+                )
+            user.onboarded_at = now()
+            user.save(update_fields=["onboarded_at"])
+
+        return Response(
+            {
+                "onboarded_at": user.onboarded_at,
+                "surveys_due": len(due_surveys(user)),
+                "course": course and {"slug": course.slug, "name": course.name},
+                "student_count": student_count,
+            }
+        )
 
     @action(
         detail=False, methods=["post"], permission_classes=[permissions.IsAdminUser]

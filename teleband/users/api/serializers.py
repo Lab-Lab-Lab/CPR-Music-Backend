@@ -25,7 +25,9 @@ class UserSerializer(serializers.ModelSerializer):
             "instrument",
             "external_id",
             "groups",
+            "onboarded_at",
         ]
+        read_only_fields = ["onboarded_at"]
 
         extra_kwargs = {
             "url": {"view_name": "api:user-detail", "lookup_field": "username"}

@@ -35,4 +35,6 @@ class TestUserViewSet:
             "grade": user.grade,
             "id": user.id,
             "instrument": user.instrument,
+            "groups": [],
+            "onboarded_at": user.onboarded_at,
         }

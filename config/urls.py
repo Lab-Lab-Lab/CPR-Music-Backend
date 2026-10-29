@@ -69,6 +69,7 @@ urlpatterns = [
         name="swagger-ui",
     ),
     path("dashboards/", include("teleband.dashboards.urls", namespace="dashboards")),
+    path("research/", include("teleband.research.urls", namespace="research")),
 ]
 
 # Serve media files - in production with S3 this is handled by S3,
