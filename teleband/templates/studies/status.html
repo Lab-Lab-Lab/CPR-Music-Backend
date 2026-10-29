@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} · {{ study.name }}{% endblock %}
+
+{% block javascript %}
+  {{ block.super }}
+  {% if refresh_url %}<meta http-equiv="refresh" content="{{ refresh_seconds }};url={{ refresh_url }}">{% endif %}
+{% endblock %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p class="lead">{{ study.name }}</p>
+  <p>{{ message }}</p>
+  {% if check_again_url and not refresh_url %}
+    <p>Still waiting? <a class="btn btn-primary" href="{{ check_again_url }}">Check again</a></p>
+  {% endif %}
+  {% if continue_url %}
+    <p><a class="btn btn-primary" href="{{ continue_url }}">Continue to MusicCPR</a></p>
+  {% endif %}
+{% endblock content %}

@@ -93,6 +93,7 @@ LOCAL_APPS = [
     "teleband.musics",
     "teleband.submissions",
     "teleband.dashboards",
+    "teleband.studies",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -315,6 +316,11 @@ INVITATIONS_ACCEPT_INVITE_AFTER_SIGNUP = env.bool(
 INVITATIONS_GONE_ON_ACCEPT_ERROR = env.bool(
     "DJANGO_INVITATIONS_GONE_ON_ACCEPT_ERROR", False
 )
+
+# Studies (Qualtrics onboarding)
+# ------------------------------------------------------------------------------
+# Where an enrolled participant who already has a password is sent to continue.
+STUDIES_APP_HOME_URL = env("STUDIES_APP_HOME_URL", default="/")
 
 
 # drf-spectacular

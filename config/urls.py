@@ -69,6 +69,7 @@ urlpatterns = [
         name="swagger-ui",
     ),
     path("dashboards/", include("teleband.dashboards.urls", namespace="dashboards")),
+    path("s/", include("teleband.studies.urls", namespace="studies")),
 ]
 
 # Serve media files - in production with S3 this is handled by S3,
@@ -87,6 +88,8 @@ if settings.DEBUG:
 
 # API URLS
 urlpatterns += [
+    # Qualtrics Web Service callbacks (authenticated by per-study secret)
+    path("api/qualtrics/", include("teleband.studies.api.urls", namespace="qualtrics")),
     # API base url
     path("api/", include("config.api_router")),
     # DRF auth token
