@@ -6,22 +6,33 @@ from django.contrib.auth.models import Group
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from teleband.research.models import Study, StudyParticipant, Survey
+from teleband.studies.models import Study, StudyParticipant, Survey
 
 DEMO_SURVEY_URL = "https://jmu.co1.qualtrics.com/jfe/form/SV_bC2q9q1gVH3sDEG"
 
 
 class Command(BaseCommand):
     help = (
-        "Local demo data for research surveys + teacher onboarding: a study with "
-        "three surveys and a brand-new teacher meteacher1 / meteacher1."
+        "Local demo data for studies + teacher onboarding: a study with three "
+        "follow-up surveys and a brand-new teacher meteacher1 / meteacher1 who "
+        "consented 8 days ago."
     )
 
     def handle(self, *args, **options):
         if not settings.DEBUG:
             raise CommandError("Demo data is for local development only (DEBUG).")
 
-        study, _ = Study.objects.get_or_create(name="Demo Study")
+        study, _ = Study.objects.get_or_create(
+            slug="demo",
+            defaults={
+                "name": "Demo Study",
+                "status": Study.Status.RECRUITING,
+                "qualtrics_survey_id": "SV_bC2q9q1gVH3sDEG",
+                "qualtrics_base_url": "https://jmu.co1.qualtrics.com",
+                "callback_secret_ref": "DEMO_STUDY_SECRET",
+                "current_consent_version": "demo-v1",
+            },
+        )
         for title, days in [("Intake", 0), ("Week 1", 7), ("Week 4", 28)]:
             Survey.objects.update_or_create(
                 study=study,
@@ -39,11 +50,16 @@ class Command(BaseCommand):
         teacher.save()
         teacher.groups.add(Group.objects.get_or_create(name="Teacher")[0])
 
-        # Started 8 days ago, so Intake and Week 1 are due and Week 4 is not.
+        # Consented 8 days ago, so Intake and Week 1 are due and Week 4 is not.
         StudyParticipant.objects.update_or_create(
             study=study,
             user=teacher,
-            defaults={"start_date": timezone.localdate() - datetime.timedelta(days=8)},
+            defaults={
+                "status": StudyParticipant.Status.ACTIVE,
+                "consented_outside_app": True,
+                "consent_version": study.current_consent_version,
+                "consented_at": timezone.now() - datetime.timedelta(days=8),
+            },
         )
         self.stdout.write(
             self.style.SUCCESS(

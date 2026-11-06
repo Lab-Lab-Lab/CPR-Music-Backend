@@ -2,7 +2,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from teleband.courses.tests.factories import CourseFactory, EnrollmentFactory
-from teleband.research.tests.factories import StudyParticipantFactory, SurveyFactory
+from teleband.studies.tests.factories import StudyParticipantFactory, SurveyFactory
 from teleband.users.models import Role
 from teleband.users.tests.factories import UserFactory
 

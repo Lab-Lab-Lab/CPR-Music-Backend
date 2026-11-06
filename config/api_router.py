@@ -21,7 +21,7 @@ from teleband.submissions.api.views import (
 from teleband.musics.api.views import PieceViewSet
 from teleband.instruments.api.views import InstrumentViewSet
 from teleband.users.api.views import UserInstrumentConfigViewSet
-from teleband.research.api.views import DueSurveyViewSet
+from teleband.studies.api.views import DueSurveyViewSet
 
 if settings.DEBUG:
     router = DefaultRouter()

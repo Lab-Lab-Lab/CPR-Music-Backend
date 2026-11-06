@@ -33,7 +33,7 @@ from .serializers import (
     UserInstrumentConfigSerializer,
 )
 from teleband.courses.models import Enrollment, Course
-from teleband.research.models import due_surveys
+from teleband.studies.services import due_surveys
 from teleband.users.models import InstrumentConfig
 from django.db.models import Q
 

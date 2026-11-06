@@ -1,13 +1,19 @@
-from factory import Faker, Sequence, SubFactory
+from django.utils import timezone
+from factory import Faker, LazyFunction, Sequence, SubFactory
 from factory.django import DjangoModelFactory
 
-from teleband.research.models import Study, StudyParticipant, Survey
+from teleband.studies.models import Study, StudyParticipant, Survey
 from teleband.users.tests.factories import UserFactory
 
 
 class StudyFactory(DjangoModelFactory):
 
+    slug = Sequence(lambda n: f"study-{n}")
     name = Sequence(lambda n: f"Study {n}")
+    status = Study.Status.RECRUITING
+    qualtrics_survey_id = "SV_abc123"
+    callback_secret_ref = "TEST_STUDY_SECRET"
+    current_consent_version = "v1"
 
     class Meta:
         model = Study
@@ -24,9 +30,12 @@ class SurveyFactory(DjangoModelFactory):
 
 
 class StudyParticipantFactory(DjangoModelFactory):
+    """An active participant who has already consented."""
 
     study = SubFactory(StudyFactory)
     user = SubFactory(UserFactory)
+    status = StudyParticipant.Status.ACTIVE
+    consented_at = LazyFunction(timezone.now)
 
     class Meta:
         model = StudyParticipant

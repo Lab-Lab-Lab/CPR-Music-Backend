@@ -93,6 +93,9 @@ LOCAL_APPS = [
     "teleband.musics",
     "teleband.submissions",
     "teleband.dashboards",
+    "teleband.studies",
+    # Retired: kept only so its final migration can move its data into studies
+    # and drop its tables. Remove once that has run on every database.
     "teleband.research",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
@@ -317,13 +320,10 @@ INVITATIONS_GONE_ON_ACCEPT_ERROR = env.bool(
     "DJANGO_INVITATIONS_GONE_ON_ACCEPT_ERROR", False
 )
 
-
-# research surveys
+# Studies (Qualtrics onboarding)
 # ------------------------------------------------------------------------------
-# Where the Qualtrics end-of-survey redirect finally sends the user (frontend).
-RESEARCH_SURVEY_RETURN_URL = env(
-    "DJANGO_RESEARCH_SURVEY_RETURN_URL", default="http://localhost:3000/courses"
-)
+# Where an enrolled participant who already has a password is sent to continue.
+STUDIES_APP_HOME_URL = env("STUDIES_APP_HOME_URL", default="/")
 
 
 # drf-spectacular
