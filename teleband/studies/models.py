@@ -1,10 +1,13 @@
+import datetime
 import os
 import secrets
 import string
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from teleband.assignments.models import Activity
 from teleband.musics.models import Piece
@@ -33,10 +36,17 @@ class Study(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft"
         RECRUITING = "recruiting"
+        # Not accepting new participants; existing ones still get follow-ups.
         CLOSED = "closed"
+        # Over: no recruiting and no follow-up surveys.
+        ENDED = "ended"
+
+    # Statuses in which consented participants are prompted for follow-ups.
+    SURVEY_STATUSES = [Status.RECRUITING, Status.CLOSED]
 
     slug = models.SlugField(unique=True, help_text="Used in URLs: /s/{slug}/...")
     name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
     irb_protocol = models.CharField(max_length=255, blank=True)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.DRAFT
@@ -134,6 +144,10 @@ class StudyParticipant(models.Model):
         max_length=64, unique=True, null=True, blank=True
     )
     consent_version = models.CharField(max_length=64, blank=True)
+    consented_outside_app = models.BooleanField(
+        default=False,
+        help_text="Consent was obtained outside Qualtrics and recorded by a researcher.",
+    )
     condition = models.CharField(max_length=64, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     consented_at = models.DateTimeField(null=True, blank=True)
@@ -155,6 +169,13 @@ class StudyParticipant(models.Model):
     def has_access(self):
         return self.status in self.ACCESS_STATUSES
 
+    @property
+    def start_date(self):
+        """Day 0 for follow-up surveys: the day consent was recorded."""
+        if self.consented_at is None:
+            return None
+        return timezone.localdate(self.consented_at)
+
 
 class PlannedPiece(models.Model):
     """A piece, and which of its activities, a researcher has chosen for a
@@ -171,3 +192,64 @@ class PlannedPiece(models.Model):
 
     def __str__(self):
         return f"{self.participant.pid}: {self.piece}"
+
+
+class Survey(models.Model):
+    """A follow-up Qualtrics survey, due a number of days after consent."""
+
+    study = models.ForeignKey(Study, related_name="surveys", on_delete=models.CASCADE)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    url = models.URLField(
+        max_length=1000,
+        help_text=(
+            "Qualtrics anonymous link. The app adds pid and study to it. See "
+            "docs/qualtrics_studies.md for the Web Service callback and "
+            "end-of-survey redirect."
+        ),
+    )
+    due_after_days = models.PositiveIntegerField(
+        default=0,
+        help_text="Days after the participant consented. 0 = right away.",
+    )
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["due_after_days", "order", "id"]
+
+    def __str__(self):
+        return f"{self.study}: {self.title}"
+
+    def due_date(self, participant):
+        return participant.start_date + datetime.timedelta(days=self.due_after_days)
+
+    def link_for(self, participant):
+        """The survey URL carrying the participant's pid and the study slug."""
+        parts = urlparse(self.url)
+        query = parse_qsl(parts.query) + [
+            ("pid", participant.pid),
+            ("study", self.study.slug),
+        ]
+        return urlunparse(parts._replace(query=urlencode(query)))
+
+
+class SurveyCompletion(models.Model):
+    """Recorded by the Qualtrics Web Service callback when a follow-up is done."""
+
+    survey = models.ForeignKey(
+        Survey, related_name="completions", on_delete=models.CASCADE
+    )
+    participant = models.ForeignKey(
+        StudyParticipant, related_name="survey_completions", on_delete=models.CASCADE
+    )
+    completed_at = models.DateTimeField(default=timezone.now)
+    response_id = models.CharField(
+        max_length=64, blank=True, help_text="Qualtrics ResponseID"
+    )
+
+    class Meta:
+        unique_together = ["survey", "participant"]
+
+    def __str__(self):
+        return f"{self.participant.pid} completed {self.survey}"

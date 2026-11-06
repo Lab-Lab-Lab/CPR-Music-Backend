@@ -242,6 +242,46 @@ def test_admin_invite_creates_teacher_and_emails_survey_link(
     assert study.qualtrics_survey_url(p.pid) in mail.outbox[0].body
 
 
+def _admin_add(admin_client, study, email, **extra):
+    return admin_client.post(
+        reverse("admin:studies_studyparticipant_add"),
+        {
+            "study": study.pk,
+            "teacher_email": email,
+            "planned_pieces-TOTAL_FORMS": "0",
+            "planned_pieces-INITIAL_FORMS": "0",
+            **extra,
+        },
+    )
+
+
+def test_admin_add_consented_outside_app(
+    admin_client, study, django_capture_on_commit_callbacks
+):
+    user = UserFactory(email="known@example.com")
+    with django_capture_on_commit_callbacks(execute=True):
+        response = _admin_add(
+            admin_client, study, "known@example.com", consented_outside_app="on"
+        )
+    assert response.status_code == 302, response.content
+    p = StudyParticipant.objects.get(study=study)
+    assert p.user == user
+    assert p.status == StudyParticipant.Status.ACTIVE
+    assert p.consented_outside_app
+    assert p.consented_at is not None
+    assert p.consent_version == study.current_consent_version
+    assert mail.outbox == []
+
+
+def test_admin_add_consented_requires_existing_account(admin_client, study):
+    response = _admin_add(
+        admin_client, study, "nobody@example.com", consented_outside_app="on"
+    )
+    assert response.status_code == 200
+    assert b"No account has this email" in response.content
+    assert not StudyParticipant.objects.exists()
+
+
 def test_planned_pieces_assigned_to_new_course(study):
     teacher = get_or_create_teacher("t@example.com")
     p = StudyParticipant.objects.create(

@@ -27,6 +27,14 @@ class User(AbstractUser):
             "Any string that is meaningful to the user's educational institution."
         ),
     )
+    onboarded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_(
+            "When a teacher finished first-time setup. Clear it to send them "
+            "through setup again."
+        ),
+    )
 
     def get_absolute_url(self):
         """Get url for user's detail view.

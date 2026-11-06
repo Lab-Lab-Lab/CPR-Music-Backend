@@ -12,9 +12,10 @@ from django.contrib.auth.models import Group
 from django.core.mail import send_mail
 from django.db import transaction
 from django.template.loader import render_to_string
+from django.utils import timezone
 
 from teleband.courses.helper import assign_one_piece_activity
-from teleband.studies.models import StudyParticipant
+from teleband.studies.models import Study, StudyParticipant, Survey
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,50 @@ def apply_planned_pieces(course, user):
                     course, planned.piece, activity
                 )
     return assignments
+
+
+def mark_consented_outside_app(participant):
+    """Record that a researcher obtained this participant's consent outside
+    Qualtrics. Doesn't save. Follow-up surveys count from now."""
+    study = participant.study
+    participant.status = StudyParticipant.Status.ACTIVE
+    participant.consented_outside_app = True
+    participant.consent_version = study.current_consent_version
+    participant.condition = assign_condition(study)
+    participant.consented_at = timezone.now()
+
+
+def due_surveys(user, today=None):
+    """Follow-up surveys this user should be reminded about: active surveys in
+    studies still running follow-ups, for participations with access, whose due
+    date has arrived and which aren't completed. Returns a list of
+    (survey, participant, due_date), soonest due first."""
+    today = today or timezone.localdate()
+    participants = {
+        p.study_id: p
+        for p in StudyParticipant.objects.filter(
+            user=user,
+            status__in=StudyParticipant.ACCESS_STATUSES,
+            consented_at__isnull=False,
+            study__status__in=Study.SURVEY_STATUSES,
+        )
+    }
+    if not participants:
+        return []
+
+    surveys = (
+        Survey.objects.filter(study_id__in=participants, is_active=True)
+        .exclude(completions__participant__in=participants.values())
+        .select_related("study")
+    )
+    due = []
+    for survey in surveys:
+        participant = participants[survey.study_id]
+        due_date = survey.due_date(participant)
+        if due_date <= today:
+            due.append((survey, participant, due_date))
+    due.sort(key=lambda row: (row[2], row[0].order, row[0].pk))
+    return due
 
 
 def app_home_url():

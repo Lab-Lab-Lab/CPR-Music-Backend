@@ -94,6 +94,9 @@ LOCAL_APPS = [
     "teleband.submissions",
     "teleband.dashboards",
     "teleband.studies",
+    # Retired: kept only so its final migration can move its data into studies
+    # and drop its tables. Remove once that has run on every database.
+    "teleband.research",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
