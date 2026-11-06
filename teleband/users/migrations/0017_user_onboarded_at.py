@@ -6,13 +6,17 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('users', '0016_update_default_config_description'),
+        ("users", "0016_update_default_config_description"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='user',
-            name='onboarded_at',
-            field=models.DateTimeField(blank=True, help_text='When a teacher finished first-time setup. Clear it to send them through setup again.', null=True),
+            model_name="user",
+            name="onboarded_at",
+            field=models.DateTimeField(
+                blank=True,
+                help_text="When a teacher finished first-time setup. Clear it to send them through setup again.",
+                null=True,
+            ),
         ),
     ]
