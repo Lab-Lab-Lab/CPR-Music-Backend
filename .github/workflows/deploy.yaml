@@ -77,6 +77,9 @@ jobs:
           push: true
           platforms: ${{ vars.DOCKER_PLATFORMS != '' && vars.DOCKER_PLATFORMS || 'linux/arm64' }}
           tags: ${{ steps.image.outputs.tags }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            APP_VERSION=${{ github.event.release.tag_name || 'nightly' }}
 
   deploy-dev:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -97,6 +100,38 @@ jobs:
             --service "${{ vars.ECS_DEV_SERVICE }}" \
             --force-new-deployment
 
+  # Separate from the deploy job on purpose: an `environment:` on a job that
+  # assumes the AWS role would change its OIDC subject to
+  # repo:...:environment:dev, which the role's trust policy doesn't allow.
+  # This job needs no AWS credentials. Its pass/fail becomes the GitHub
+  # Deployment status for the `dev` environment.
+  verify-dev:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://dev-api.musiccpr.org/version
+    timeout-minutes: 20
+
+    steps:
+      - name: Wait for https://dev-api.musiccpr.org to serve this commit
+        env:
+          URL: https://dev-api.musiccpr.org/version
+          SHA: ${{ github.sha }}
+        run: |
+          for i in $(seq 1 60); do
+            body=$(curl -fsS --max-time 10 "$URL" || true)
+            echo "[$i] $body"
+            if [[ "$body" == *"\"$SHA\""* ]]; then
+              echo "Deployed: $SHA"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Timed out waiting for $SHA at $URL" >&2
+          exit 1
+
   deploy-prod:
     if: github.event_name == 'release' && github.event.release.prerelease == false
     needs: build-and-push
@@ -115,3 +150,35 @@ jobs:
             --cluster "${{ vars.ECS_PROD_CLUSTER }}" \
             --service "${{ vars.ECS_PROD_SERVICE }}" \
             --force-new-deployment
+
+  # Separate from the deploy job on purpose: an `environment:` on a job that
+  # assumes the AWS role would change its OIDC subject to
+  # repo:...:environment:production, which the role's trust policy doesn't allow.
+  # This job needs no AWS credentials. Its pass/fail becomes the GitHub
+  # Deployment status for the `production` environment.
+  verify-production:
+    if: github.event_name == 'release' && github.event.release.prerelease == false
+    needs: deploy-prod
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.musiccpr.org/version
+    timeout-minutes: 20
+
+    steps:
+      - name: Wait for https://api.musiccpr.org to serve this commit
+        env:
+          URL: https://api.musiccpr.org/version
+          SHA: ${{ github.sha }}
+        run: |
+          for i in $(seq 1 60); do
+            body=$(curl -fsS --max-time 10 "$URL" || true)
+            echo "[$i] $body"
+            if [[ "$body" == *"\"$SHA\""* ]]; then
+              echo "Deployed: $SHA"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Timed out waiting for $SHA at $URL" >&2
+          exit 1
