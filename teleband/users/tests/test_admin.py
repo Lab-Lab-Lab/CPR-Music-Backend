@@ -28,6 +28,9 @@ class TestUserAdmin:
                 "username": "test",
                 "password1": "My_R@ndom-P@ssw0rd",
                 "password2": "My_R@ndom-P@ssw0rd",
+                # Management form for UserAdmin's EnrollmentInline.
+                "enrollment_set-TOTAL_FORMS": "0",
+                "enrollment_set-INITIAL_FORMS": "0",
             },
         )
         assert response.status_code == 302
