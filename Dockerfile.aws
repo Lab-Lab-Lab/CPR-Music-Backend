@@ -30,6 +30,11 @@ ENV PYTHONUNBUFFERED=1
 
 RUN chmod +x /app/entrypoint.prod.sh
 
+# Build metadata, served at /version (set by the deploy workflow)
+ARG GIT_SHA=unknown
+ARG APP_VERSION=dev
+ENV GIT_SHA=$GIT_SHA APP_VERSION=$APP_VERSION
+
 EXPOSE 8000
 
 CMD ["/app/entrypoint.prod.sh"]
