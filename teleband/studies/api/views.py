@@ -1,4 +1,3 @@
-import hmac
 import logging
 
 from django.utils import timezone
@@ -13,15 +12,6 @@ from teleband.studies.models import Study, StudyParticipant, SurveyCompletion
 from teleband.studies.services import InvalidCondition, assign_condition, due_surveys
 
 logger = logging.getLogger(__name__)
-
-
-def secret_matches(provided, accepted):
-    # Compare against every accepted secret so timing doesn't reveal which one
-    # (if any) was close.
-    matched = False
-    for secret in accepted:
-        matched |= hmac.compare_digest(provided.encode(), secret.encode())
-    return matched
 
 
 class QualtricsCallbackView(APIView):
@@ -42,7 +32,7 @@ class QualtricsCallbackView(APIView):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         provided = request.headers.get("X-Study-Secret", "")
-        if not secret_matches(provided, study.callback_secrets()):
+        if not study.check_callback_secret(provided):
             logger.warning("Bad X-Study-Secret for study %s", slug)
             return Response(status=status.HTTP_401_UNAUTHORIZED)
 

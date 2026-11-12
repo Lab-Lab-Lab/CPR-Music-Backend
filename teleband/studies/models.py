@@ -1,5 +1,6 @@
 import datetime
-import os
+import hashlib
+import hmac
 import secrets
 import string
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -19,15 +20,11 @@ def generate_pid():
     return "p_" + "".join(secrets.choice(PID_ALPHABET) for _ in range(12))
 
 
-def resolve_secret_ref(ref):
-    """Look up a secret by its reference (an environment variable name).
-
-    The variable may hold several comma-separated values so that an old and a
-    new secret are both accepted while a rotation is in progress.
-    """
-    if not ref:
-        return []
-    return [s.strip() for s in os.environ.get(ref, "").split(",") if s.strip()]
+def hash_callback_secret(secret):
+    # The secret is random and high-entropy, so a fast unsalted hash is enough:
+    # it can't be brute-forced, and it keeps a leaked database row from being
+    # usable as the secret.
+    return hashlib.sha256(secret.encode()).hexdigest()
 
 
 class Study(models.Model):
@@ -58,13 +55,13 @@ class Study(models.Model):
         blank=True,
         help_text="Name of the environment variable holding this study's Qualtrics API token.",
     )
-    callback_secret_ref = models.CharField(
-        max_length=255,
-        help_text=(
-            "Name of the environment variable holding this study's shared secret "
-            "(sent by Qualtrics in the X-Study-Secret header). Comma-separate "
-            "values in the variable to accept old and new secrets during rotation."
-        ),
+    # SHA-256 of the shared secret Qualtrics sends in the X-Study-Secret
+    # header. The secret itself is shown once, when generated, and not stored.
+    callback_secret_hash = models.CharField(max_length=64, blank=True, editable=False)
+    # Still accepted after a rotation, until revoked, so Qualtrics can be
+    # updated without dropping callbacks.
+    previous_callback_secret_hash = models.CharField(
+        max_length=64, blank=True, editable=False
     )
     current_consent_version = models.CharField(max_length=64)
     config = models.JSONField(
@@ -85,8 +82,32 @@ class Study(models.Model):
     def __str__(self):
         return self.name
 
-    def callback_secrets(self):
-        return resolve_secret_ref(self.callback_secret_ref)
+    def generate_callback_secret(self, keep_previous=False):
+        """Set a new random callback secret and return it. Only its hash is
+        kept, so the caller must show it to the researcher now. With
+        keep_previous, the old secret stays valid until revoked. Doesn't save."""
+        secret = secrets.token_urlsafe(32)
+        self.previous_callback_secret_hash = (
+            self.callback_secret_hash if keep_previous else ""
+        )
+        self.callback_secret_hash = hash_callback_secret(secret)
+        return secret
+
+    def check_callback_secret(self, provided):
+        provided_hash = hash_callback_secret(provided)
+        # Compare against both hashes so timing doesn't reveal which matched.
+        matched = False
+        for accepted in (self.callback_secret_hash, self.previous_callback_secret_hash):
+            if accepted:
+                matched |= hmac.compare_digest(provided_hash, accepted)
+        return bool(provided) and matched
+
+    def save(self, *args, **kwargs):
+        if not self.callback_secret_hash:
+            # Never leave a study with no secret. Admin generates (and shows)
+            # one itself; this is a backstop for other code paths.
+            self.generate_callback_secret()
+        super().save(*args, **kwargs)
 
     def qualtrics_survey_url(self, pid):
         base = self.qualtrics_base_url.rstrip("/")

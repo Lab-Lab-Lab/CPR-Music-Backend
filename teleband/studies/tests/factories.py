@@ -12,7 +12,6 @@ class StudyFactory(DjangoModelFactory):
     name = Sequence(lambda n: f"Study {n}")
     status = Study.Status.RECRUITING
     qualtrics_survey_id = "SV_abc123"
-    callback_secret_ref = "TEST_STUDY_SECRET"
     current_consent_version = "v1"
 
     class Meta:

@@ -6,7 +6,12 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from teleband.studies.models import Study, StudyParticipant, SurveyCompletion
+from teleband.studies.models import (
+    Study,
+    StudyParticipant,
+    SurveyCompletion,
+    hash_callback_secret,
+)
 from teleband.studies.services import due_surveys
 from teleband.users.tests.factories import UserFactory
 
@@ -14,7 +19,6 @@ from .factories import StudyParticipantFactory, SurveyFactory
 
 pytestmark = pytest.mark.django_db
 
-SECRET_ENV = "TEST_STUDY_SECRET"
 START = datetime.date(2026, 10, 1)
 
 
@@ -117,8 +121,10 @@ def test_api_requires_login():
 
 class TestSurveyCompleteCallback:
     @pytest.fixture(autouse=True)
-    def secret(self, monkeypatch):
-        monkeypatch.setenv(SECRET_ENV, "s3cret")
+    def secret(self, participant):
+        study = participant.study
+        study.callback_secret_hash = hash_callback_secret("s3cret")
+        study.save()
 
     def post(self, survey, pid, secret="s3cret", **data):
         return APIClient(enforce_csrf_checks=True).post(
