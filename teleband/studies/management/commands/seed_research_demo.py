@@ -6,8 +6,14 @@ from django.contrib.auth.models import Group
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from teleband.studies.models import Study, StudyParticipant, Survey
+from teleband.studies.models import (
+    Study,
+    StudyParticipant,
+    Survey,
+    hash_callback_secret,
+)
 
+DEMO_CALLBACK_SECRET = "demo-secret"
 DEMO_SURVEY_URL = "https://jmu.co1.qualtrics.com/jfe/form/SV_bC2q9q1gVH3sDEG"
 
 
@@ -29,7 +35,6 @@ class Command(BaseCommand):
                 "status": Study.Status.RECRUITING,
                 "qualtrics_survey_id": "SV_bC2q9q1gVH3sDEG",
                 "qualtrics_base_url": "https://jmu.co1.qualtrics.com",
-                "callback_secret_ref": "DEMO_STUDY_SECRET",
                 "current_consent_version": "demo-v1",
             },
         )
@@ -61,8 +66,13 @@ class Command(BaseCommand):
                 "consented_at": timezone.now() - datetime.timedelta(days=8),
             },
         )
+        # A fixed, known secret so local callbacks can be tried with curl.
+        study.callback_secret_hash = hash_callback_secret(DEMO_CALLBACK_SECRET)
+        study.previous_callback_secret_hash = ""
+        study.save()
         self.stdout.write(
             self.style.SUCCESS(
-                "Demo ready: log in as meteacher1 / meteacher1 at /courses"
+                "Demo ready: log in as meteacher1 / meteacher1 at /courses. "
+                f"Callback secret: {DEMO_CALLBACK_SECRET}"
             )
         )

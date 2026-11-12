@@ -32,6 +32,54 @@ class StudyAdmin(VersionAdmin):
     search_fields = ("slug", "name", "irb_protocol")
     prepopulated_fields = {"slug": ("name",)}
     inlines = (SurveyInline,)
+    readonly_fields = ("callback_secret",)
+    actions = ("rotate_callback_secret", "revoke_previous_callback_secret")
+
+    @admin.display(description="Callback secret")
+    def callback_secret(self, obj):
+        if not obj.pk:
+            return "Generated when you save. It is shown once, so copy it then."
+        if obj.previous_callback_secret_hash:
+            return (
+                "Set. The previous secret is also still accepted; revoke it once "
+                "Qualtrics uses the new one."
+            )
+        return (
+            'Set. Only a hash is stored. Use the "Rotate callback secret" '
+            "action if it's lost or leaked."
+        )
+
+    def show_secret(self, request, study, secret):
+        self.message_user(
+            request,
+            f"X-Study-Secret for {study.slug}: {secret} "
+            "(copy it now; it won't be shown again)",
+            messages.WARNING,
+        )
+
+    def save_model(self, request, obj, form, change):
+        secret = None if change else obj.generate_callback_secret()
+        super().save_model(request, obj, form, change)
+        if secret:
+            self.show_secret(request, obj, secret)
+
+    @admin.action(
+        description="Rotate callback secret (the previous one stays valid until revoked)"
+    )
+    def rotate_callback_secret(self, request, queryset):
+        for study in queryset:
+            secret = study.generate_callback_secret(keep_previous=True)
+            study.save(
+                update_fields=["callback_secret_hash", "previous_callback_secret_hash"]
+            )
+            self.show_secret(request, study, secret)
+
+    @admin.action(description="Revoke previous callback secret")
+    def revoke_previous_callback_secret(self, request, queryset):
+        n = queryset.exclude(previous_callback_secret_hash="").update(
+            previous_callback_secret_hash=""
+        )
+        self.message_user(request, f"Revoked the previous secret on {n} study(ies).")
 
 
 class PlannedPieceInline(admin.TabularInline):

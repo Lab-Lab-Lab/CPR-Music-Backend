@@ -8,27 +8,36 @@ from teleband.assignments.models import CourseAssignment
 from teleband.assignments.tests.factories import ActivityFactory
 from teleband.courses.tests.factories import CourseFactory
 from teleband.musics.tests.factories import PieceFactory
-from teleband.studies.models import PlannedPiece, Study, StudyParticipant
+from teleband.studies.models import (
+    PlannedPiece,
+    Study,
+    StudyParticipant,
+    hash_callback_secret,
+)
 from teleband.studies.services import apply_planned_pieces, get_or_create_teacher
 from teleband.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
 
-SECRET_ENV = "TEST_STUDY_SECRET"
+
+def set_secrets(study, current, previous=""):
+    study.callback_secret_hash = hash_callback_secret(current)
+    study.previous_callback_secret_hash = previous and hash_callback_secret(previous)
+    study.save()
+    return study
 
 
 @pytest.fixture
-def study(monkeypatch):
-    monkeypatch.setenv(SECRET_ENV, "old-secret,new-secret")
-    return Study.objects.create(
+def study():
+    study = Study.objects.create(
         slug="pilot",
         name="Pilot Study",
         status=Study.Status.RECRUITING,
         qualtrics_survey_id="SV_abc123",
         qualtrics_base_url="https://jmu.qualtrics.com",
-        callback_secret_ref=SECRET_ENV,
         current_consent_version="v1",
     )
+    return set_secrets(study, "new-secret", previous="old-secret")
 
 
 def post_callback(study, pid, kind="consent", secret="new-secret", **data):
@@ -69,7 +78,6 @@ class TestConsentCallback:
             name="Other",
             status=Study.Status.RECRUITING,
             qualtrics_survey_id="SV_other",
-            callback_secret_ref=SECRET_ENV,
             current_consent_version="v1",
         )
         p = StudyParticipant.objects.create(study=other)
@@ -148,7 +156,6 @@ class TestJoin:
             name="Pilot 2",
             status=Study.Status.RECRUITING,
             qualtrics_survey_id="SV_2",
-            callback_secret_ref=SECRET_ENV,
             current_consent_version="v1",
             config={"exclude_if_enrolled_in": ["pilot"]},
         )
@@ -331,3 +338,79 @@ def test_course_create_endpoint_applies_plan(study):
     )
     assert response.status_code == 201, response.content
     assert CourseAssignment.objects.filter(course__owner=teacher).count() == 1
+
+
+class TestCallbackSecret:
+    def test_only_hash_is_stored(self, study):
+        secret = study.generate_callback_secret()
+        study.save()
+        study.refresh_from_db()
+        assert secret not in (
+            study.callback_secret_hash,
+            study.previous_callback_secret_hash,
+        )
+        assert study.check_callback_secret(secret)
+        assert not study.check_callback_secret("new-secret")
+
+    def test_rotation_keeps_previous_until_revoked(self, study):
+        secret = study.generate_callback_secret(keep_previous=True)
+        assert study.check_callback_secret(secret)
+        assert study.check_callback_secret("new-secret")
+        assert not study.check_callback_secret("old-secret")
+
+    def test_empty_secret_never_matches(self, study):
+        study.previous_callback_secret_hash = hash_callback_secret("")
+        assert not study.check_callback_secret("")
+
+    def test_new_study_always_has_a_secret(self):
+        study = Study.objects.create(
+            slug="s", name="S", qualtrics_survey_id="SV_1", current_consent_version="v1"
+        )
+        assert study.callback_secret_hash
+
+    def test_admin_shows_secret_once_on_add(self, admin_client):
+        response = admin_client.post(
+            reverse("admin:studies_study_add"),
+            {
+                "slug": "new",
+                "name": "New",
+                "status": "draft",
+                "qualtrics_survey_id": "SV_1",
+                "qualtrics_base_url": "https://jmu.qualtrics.com",
+                "current_consent_version": "v1",
+                "config": "{}",
+                "surveys-TOTAL_FORMS": "0",
+                "surveys-INITIAL_FORMS": "0",
+            },
+            follow=True,
+        )
+        msgs = [str(m) for m in response.context["messages"]]
+        secret_msg = next(m for m in msgs if "X-Study-Secret for new:" in m)
+        secret = secret_msg.split(": ", 1)[1].split(" ")[0]
+        assert Study.objects.get(slug="new").check_callback_secret(secret)
+
+    def test_admin_rotate_and_revoke(self, admin_client, study):
+        url = reverse("admin:studies_study_changelist")
+        response = admin_client.post(
+            url,
+            {"action": "rotate_callback_secret", "_selected_action": [study.pk]},
+            follow=True,
+        )
+        msg = next(
+            str(m) for m in response.context["messages"] if "X-Study-Secret" in str(m)
+        )
+        secret = msg.split(": ", 1)[1].split(" ")[0]
+        study.refresh_from_db()
+        assert study.check_callback_secret(secret)
+        assert study.check_callback_secret("new-secret")
+
+        admin_client.post(
+            url,
+            {
+                "action": "revoke_previous_callback_secret",
+                "_selected_action": [study.pk],
+            },
+        )
+        study.refresh_from_db()
+        assert study.check_callback_secret(secret)
+        assert not study.check_callback_secret("new-secret")

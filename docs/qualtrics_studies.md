@@ -25,31 +25,22 @@ Qualtrics End of Survey ── redirect ──► /s/{slug}/onboard?pid=…
 
 **Admin → Studies → Add**
 
-| Field | Value |
-|-------|-------|
-| `slug` | Used in every URL, e.g. `pilot-2026` |
-| `status` | `draft` while testing. `recruiting`: consent callbacks and `/join` work. `closed`: no new participants, but consented ones still get follow-up surveys. `ended`: nothing. |
-| `qualtrics_survey_id` | `SV_xxxxxxxx` |
-| `qualtrics_base_url` | Your Qualtrics domain, e.g. `https://jmu.qualtrics.com` (or `https://jmu.co1.qualtrics.com`). The emailed survey link is built from this. |
-| `callback_secret_ref` | The **name** of an environment variable that holds the secret (e.g. `STUDY_PILOT_2026_SECRET`), not the secret itself |
-| `current_consent_version` | e.g. `v2-2026-10-01`. Used when Qualtrics doesn't send `consentVersion`. |
-| `config` | JSON; see [Study config](#study-config) |
-| `max_enrollment` | Optional cap on consented/active/completed participants |
-| `qualtrics_api_token_ref` | Stored but not used yet |
+| Field                     | Value                                                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `slug`                    | Used in every URL, e.g. `pilot-2026`                                                                                                                                      |
+| `status`                  | `draft` while testing. `recruiting`: consent callbacks and `/join` work. `closed`: no new participants, but consented ones still get follow-up surveys. `ended`: nothing. |
+| `qualtrics_survey_id`     | `SV_xxxxxxxx`                                                                                                                                                             |
+| `qualtrics_base_url`      | Your Qualtrics domain, e.g. `https://jmu.qualtrics.com` (or `https://jmu.co1.qualtrics.com`). The emailed survey link is built from this.                                 |
+| `current_consent_version` | e.g. `v2-2026-10-01`. Used when Qualtrics doesn't send `consentVersion`.                                                                                                  |
+| `config`                  | JSON; see [Study config](#study-config)                                                                                                                                   |
+| `max_enrollment`          | Optional cap on consented/active/completed participants                                                                                                                   |
+| `qualtrics_api_token_ref` | Stored but not used yet                                                                                                                                                   |
 
-## 2. Set the secret
+## 2. Copy the callback secret
 
-Generate a secret and set it on the backend (e.g. in Railway's environment variables) under the name you entered in `callback_secret_ref`:
+When you save a new study, the admin generates its callback secret and shows it once in a message at the top of the page. Copy it into the Qualtrics `X-Study-Secret` header (step 3). Only a SHA-256 hash is stored, so the secret can't be shown again.
 
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-```
-STUDY_PILOT_2026_SECRET=<secret>
-```
-
-**Rotation:** set the variable to `old,new` (comma-separated), update the header in Qualtrics, then remove `old`.
+**Rotation:** if the secret is lost or leaked, select the study in **Admin → Studies** and run **Rotate callback secret**. The new secret is shown once, and the previous one stays valid so callbacks keep working. Update the header in Qualtrics, then run **Revoke previous callback secret**. To cut off a leaked secret right away, run both actions back to back.
 
 ## 3. Build the Qualtrics survey
 
@@ -83,13 +74,13 @@ Build this once, save it to the Qualtrics Library, and copy it for each study.
 
 ### Callback responses
 
-| Code | Meaning |
-|------|---------|
-| 200 | Recorded, or the same call was already recorded (safe to retry) |
-| 400 | `condition` isn't one of the study's conditions (`"assignment": "qualtrics"` only) |
-| 401 | Missing or wrong `X-Study-Secret` |
-| 404 | Study isn't `recruiting`, or the `pid` doesn't belong to this study |
-| 409 | Participant is no longer pending, or the ResponseID is already used by another participant |
+| Code | Meaning                                                                                    |
+| ---- | ------------------------------------------------------------------------------------------ |
+| 200  | Recorded, or the same call was already recorded (safe to retry)                            |
+| 400  | `condition` isn't one of the study's conditions (`"assignment": "qualtrics"` only)         |
+| 401  | Missing or wrong `X-Study-Secret`                                                          |
+| 404  | Study isn't `recruiting`, or the `pid` doesn't belong to this study                        |
+| 409  | Participant is no longer pending, or the ResponseID is already used by another participant |
 
 ## 4. Invite teachers
 
@@ -137,23 +128,22 @@ The callback is what records completion; the redirect only moves the teacher alo
 }
 ```
 
-| Key | Effect |
-|-----|--------|
-| `conditions` | Experimental arms. If empty, whatever Qualtrics posts as `condition` is stored as-is. |
-| `assignment` | `"app"` (default): the app assigns the arm with the fewest enrolled participants, ties broken at random. `"qualtrics"`: the posted `condition` is used and must be in `conditions`. |
-| `exclude_if_enrolled_in` | Study slugs; a user enrolled in any of them is turned away at `/join` |
-| `allow_anonymous` | Let `/join` start a participation without a login (otherwise it redirects to login) |
+| Key                      | Effect                                                                                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `conditions`             | Experimental arms. If empty, whatever Qualtrics posts as `condition` is stored as-is.                                                                                               |
+| `assignment`             | `"app"` (default): the app assigns the arm with the fewest enrolled participants, ties broken at random. `"qualtrics"`: the posted `condition` is used and must be in `conditions`. |
+| `exclude_if_enrolled_in` | Study slugs; a user enrolled in any of them is turned away at `/join`                                                                                                               |
+| `allow_anonymous`        | Let `/join` start a participation without a login (otherwise it redirects to login)                                                                                                 |
 
 ## Settings
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `STUDIES_APP_HOME_URL` | `/` | Where "Continue to MusicCPR" goes for an enrolled teacher who already has a password (usually the frontend URL) |
-| *(per study)* | | The variable named in each study's `callback_secret_ref` |
+| Variable               | Default | Purpose                                                                                                         |
+| ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `STUDIES_APP_HOME_URL` | `/`     | Where "Continue to MusicCPR" goes for an enrolled teacher who already has a password (usually the frontend URL) |
 
 ## Local demo
 
-`python manage.py seed_research_demo` (DEBUG only) creates a `demo` study with three follow-up surveys and a teacher `meteacher1` / `meteacher1` who consented 8 days ago.
+`python manage.py seed_research_demo` (DEBUG only) creates a `demo` study with three follow-up surveys and a teacher `meteacher1` / `meteacher1` who consented 8 days ago. Its callback secret is `demo-secret`.
 
 ## Testing a new study
 
@@ -173,7 +163,7 @@ The callback is what records completion; the redirect only moves the teacher alo
 ## Troubleshooting
 
 - **Onboard page stuck on "Finishing up…":** it polls for about 15 seconds, then shows a "Check again" button. If it never clears, the callback didn't arrive. Check the Web Service URL/slug, that the study is `recruiting`, and backend logs for `Bad X-Study-Secret`.
-- **401 from the callback:** the header doesn't match any value in the environment variable named by `callback_secret_ref`, or that variable isn't set on the running backend.
+- **401 from the callback:** the header matches neither the study's current secret nor an unrevoked previous one. If nobody has the secret any more, rotate it (see [step 2](#2-copy-the-callback-secret)).
 - **Wrong domain in the emailed link:** fix `qualtrics_base_url` on the study.
 
 ## Not implemented yet
