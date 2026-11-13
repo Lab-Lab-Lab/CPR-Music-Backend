@@ -10,8 +10,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
-from teleband.assignments.models import Activity
-from teleband.musics.models import Piece
+from teleband.assignments.models import Curriculum
 
 PID_ALPHABET = string.ascii_lowercase + string.digits
 
@@ -170,6 +169,17 @@ class StudyParticipant(models.Model):
         help_text="Consent was obtained outside Qualtrics and recorded by a researcher.",
     )
     condition = models.CharField(max_length=64, blank=True)
+    curriculum = models.ForeignKey(
+        Curriculum,
+        null=True,
+        blank=True,
+        related_name="study_participants",
+        on_delete=models.PROTECT,
+        help_text=(
+            "This teacher's curriculum, tied to the course created for them "
+            "when they were added to the study."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     consented_at = models.DateTimeField(null=True, blank=True)
     withdrawn_at = models.DateTimeField(null=True, blank=True)
@@ -196,23 +206,6 @@ class StudyParticipant(models.Model):
         if self.consented_at is None:
             return None
         return timezone.localdate(self.consented_at)
-
-
-class PlannedPiece(models.Model):
-    """A piece, and which of its activities, a researcher has chosen for a
-    teacher participant. Applied to each course the teacher creates."""
-
-    participant = models.ForeignKey(
-        StudyParticipant, related_name="planned_pieces", on_delete=models.CASCADE
-    )
-    piece = models.ForeignKey(Piece, on_delete=models.PROTECT)
-    activities = models.ManyToManyField(Activity)
-
-    class Meta:
-        unique_together = ["participant", "piece"]
-
-    def __str__(self):
-        return f"{self.participant.pid}: {self.piece}"
 
 
 class Survey(models.Model):

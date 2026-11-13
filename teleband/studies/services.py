@@ -1,3 +1,4 @@
+import datetime
 import logging
 import random
 from collections import Counter
@@ -14,8 +15,9 @@ from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from teleband.courses.helper import assign_one_piece_activity
+from teleband.courses.models import Course, Enrollment
 from teleband.studies.models import Study, StudyParticipant, Survey
+from teleband.users.models import Role
 
 logger = logging.getLogger(__name__)
 
@@ -110,20 +112,22 @@ def send_invitation_email_on_commit(participant):
     transaction.on_commit(lambda: send_invitation_email(participant))
 
 
-def apply_planned_pieces(course, user):
-    """Assign the pieces/activities researchers planned for this teacher's
-    consented study participations to their newly created course."""
-    participants = StudyParticipant.objects.filter(
-        user=user, status__in=StudyParticipant.ACCESS_STATUSES
-    ).prefetch_related("planned_pieces__piece", "planned_pieces__activities")
-    assignments = []
-    for participant in participants:
-        for planned in participant.planned_pieces.all():
-            for activity in planned.activities.all():
-                assignments += assign_one_piece_activity(
-                    course, planned.piece, activity
-                )
-    return assignments
+def create_study_course(participant, name=None):
+    """A course for a teacher participant, which they own and teach, named
+    after the study and teacher. The teacher can rename it. Doesn't touch the
+    participant."""
+    user = participant.user
+    today = timezone.localdate()
+    course = Course.objects.create(
+        name=name or f"{participant.study.name}: {user.email}",
+        owner=user,
+        start_date=today,
+        end_date=today + datetime.timedelta(days=365),
+    )
+    Enrollment.objects.create(
+        user=user, course=course, role=Role.objects.get_or_create(name="Teacher")[0]
+    )
+    return course
 
 
 def mark_consented_outside_app(participant):

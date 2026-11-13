@@ -1,20 +1,21 @@
 import pytest
-from django.contrib.auth.models import Group
 from django.core import mail
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from teleband.assignments.models import CourseAssignment
+from teleband.assignments.models import (
+    CourseAssignment,
+    Curriculum,
+    CurriculumEntry,
+    PiecePlan,
+    PlannedActivity,
+)
 from teleband.assignments.tests.factories import ActivityFactory
+from teleband.courses.models import Course, Enrollment
 from teleband.courses.tests.factories import CourseFactory
 from teleband.musics.tests.factories import PieceFactory
-from teleband.studies.models import (
-    PlannedPiece,
-    Study,
-    StudyParticipant,
-    hash_callback_secret,
-)
-from teleband.studies.services import apply_planned_pieces, get_or_create_teacher
+from teleband.studies.models import Study, StudyParticipant, hash_callback_secret
+from teleband.studies.services import get_or_create_teacher
 from teleband.users.tests.factories import UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -221,45 +222,113 @@ def test_withdraw(client, study):
     assert p.withdrawn_at is not None
 
 
-def test_admin_invite_creates_teacher_and_emails_survey_link(
+def make_curriculum(*piece_plans, name="Template", course=None):
+    curriculum = Curriculum.objects.create(name=name, course=course or CourseFactory())
+    for order, plan in enumerate(piece_plans):
+        CurriculumEntry.objects.create(
+            curriculum=curriculum, piece_plan=plan, order=order
+        )
+    return curriculum
+
+
+def make_piece_plan(n_activities=2, type=None):
+    plan = PiecePlan.objects.create(name="Plan", piece=PieceFactory(), type=type)
+    for order in range(n_activities):
+        PlannedActivity.objects.create(
+            piece_plan=plan, activity=ActivityFactory(), order=order
+        )
+    return plan
+
+
+def _admin_add(admin_client, study, email, **extra):
+    data = {
+        "study": study.pk,
+        "teacher_email": email,
+        "curriculum_choice": "new",
+    }
+    data.update(extra)
+    return admin_client.post(reverse("admin:studies_studyparticipant_add"), data)
+
+
+def test_admin_invite_copies_curriculum_to_new_course(
     admin_client, study, django_capture_on_commit_callbacks
 ):
-    piece = PieceFactory()
-    activity = ActivityFactory()
+    plans = [make_piece_plan(), make_piece_plan()]
+    template = make_curriculum(*plans)
     with django_capture_on_commit_callbacks(execute=True):
-        response = admin_client.post(
-            reverse("admin:studies_studyparticipant_add"),
-            {
-                "study": study.pk,
-                "teacher_email": "new.teacher@example.com",
-                "planned_pieces-TOTAL_FORMS": "1",
-                "planned_pieces-INITIAL_FORMS": "0",
-                "planned_pieces-0-piece": piece.pk,
-                "planned_pieces-0-activities": [activity.pk],
-            },
+        response = _admin_add(
+            admin_client,
+            study,
+            "new.teacher@example.com",
+            curriculum_choice="copy",
+            copy_from=template.pk,
         )
     assert response.status_code == 302, response.content
+    assert response.url == reverse("admin:studies_studyparticipant_changelist")
     p = StudyParticipant.objects.get(study=study)
     assert p.user.email == "new.teacher@example.com"
     assert not p.user.has_usable_password()
     assert p.user.groups.filter(name="Teacher").exists()
-    assert list(p.planned_pieces.get().activities.all()) == [activity]
+
+    # A course the teacher owns and teaches, named after the participant.
+    course = p.curriculum.course
+    assert course.name == "Pilot Study: new.teacher@example.com"
+    assert course.owner == p.user
+    assert Enrollment.objects.get(course=course).user == p.user
+    assert Enrollment.objects.get(course=course).role.name == "Teacher"
+
+    # A copy of the template, on that course. Nothing is assigned; the
+    # teacher does that when they're ready.
+    assert p.curriculum != template
+    assert p.curriculum.name == course.name
+    assert list(
+        p.curriculum.curriculumentry_set.values_list("piece_plan", flat=True)
+    ) == [plan.pk for plan in plans]
+    assert not CourseAssignment.objects.filter(
+        course__in=[course, template.course]
+    ).exists()
+
     assert len(mail.outbox) == 1
     assert mail.outbox[0].to == ["new.teacher@example.com"]
     assert study.qualtrics_survey_url(p.pid) in mail.outbox[0].body
 
 
-def _admin_add(admin_client, study, email, **extra):
-    return admin_client.post(
-        reverse("admin:studies_studyparticipant_add"),
-        {
-            "study": study.pk,
-            "teacher_email": email,
-            "planned_pieces-TOTAL_FORMS": "0",
-            "planned_pieces-INITIAL_FORMS": "0",
-            **extra,
-        },
+def test_admin_invite_new_curriculum_goes_to_it(admin_client, study):
+    response = _admin_add(
+        admin_client, study, "t@example.com", new_curriculum_name="Fall plan"
     )
+    p = StudyParticipant.objects.get(study=study)
+    curriculum = p.curriculum
+    assert curriculum.name == "Fall plan"
+    assert curriculum.course.owner == p.user
+    assert not curriculum.piece_plans.exists()
+    assert response.url == reverse(
+        "admin:assignments_curriculum_change", args=[curriculum.pk]
+    )
+
+
+def test_admin_invite_copy_requires_curriculum(admin_client, study):
+    courses, curricula = Course.objects.count(), Curriculum.objects.count()
+    response = _admin_add(
+        admin_client, study, "t@example.com", curriculum_choice="copy"
+    )
+    assert response.status_code == 200
+    assert b"Choose a curriculum to copy" in response.content
+    assert not StudyParticipant.objects.exists()
+    assert Course.objects.count() == courses
+    assert Curriculum.objects.count() == curricula
+
+
+def test_admin_change_page_links_curriculum_and_course(admin_client, study):
+    curriculum = make_curriculum(name="Mine")
+    p = StudyParticipant.objects.create(study=study, curriculum=curriculum)
+    response = admin_client.get(
+        reverse("admin:studies_studyparticipant_change", args=[p.pk])
+    )
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert reverse("admin:assignments_curriculum_change", args=[curriculum.pk]) in html
+    assert reverse("admin:courses_course_change", args=[curriculum.course.pk]) in html
 
 
 def test_admin_add_consented_outside_app(
@@ -287,57 +356,6 @@ def test_admin_add_consented_requires_existing_account(admin_client, study):
     assert response.status_code == 200
     assert b"No account has this email" in response.content
     assert not StudyParticipant.objects.exists()
-
-
-def test_planned_pieces_assigned_to_new_course(study):
-    teacher = get_or_create_teacher("t@example.com")
-    p = StudyParticipant.objects.create(
-        study=study, user=teacher, status=StudyParticipant.Status.CONSENTED
-    )
-    piece = PieceFactory()
-    activities = [ActivityFactory(), ActivityFactory()]
-    planned = PlannedPiece.objects.create(participant=p, piece=piece)
-    planned.activities.set(activities)
-
-    course = CourseFactory(owner=teacher)
-    apply_planned_pieces(course, teacher)
-    assert set(
-        CourseAssignment.objects.filter(course=course).values_list(
-            "activity_id", flat=True
-        )
-    ) == {a.id for a in activities}
-
-    # Not applied while consent is still pending.
-    p.status = StudyParticipant.Status.PENDING
-    p.save()
-    other_course = CourseFactory(owner=teacher)
-    apply_planned_pieces(other_course, teacher)
-    assert not CourseAssignment.objects.filter(course=other_course).exists()
-
-
-def test_course_create_endpoint_applies_plan(study):
-    teacher = get_or_create_teacher("t2@example.com")
-    assert Group.objects.get(name="Teacher") in teacher.groups.all()
-    p = StudyParticipant.objects.create(
-        study=study, user=teacher, status=StudyParticipant.Status.CONSENTED
-    )
-    planned = PlannedPiece.objects.create(participant=p, piece=PieceFactory())
-    planned.activities.set([ActivityFactory()])
-
-    client = APIClient()
-    client.force_authenticate(teacher)
-    response = client.post(
-        "/api/courses/",
-        {
-            "name": "Band",
-            "slug": "band",
-            "start_date": "2026-01-01",
-            "end_date": "2026-06-01",
-        },
-        format="json",
-    )
-    assert response.status_code == 201, response.content
-    assert CourseAssignment.objects.filter(course__owner=teacher).count() == 1
 
 
 class TestCallbackSecret:
