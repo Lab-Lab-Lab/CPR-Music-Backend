@@ -50,7 +50,6 @@ from teleband.courses.helper import (
     assign_piece_plan,
     assign_curriculum,
 )
-from teleband.studies.services import apply_planned_pieces
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +165,6 @@ class CourseViewSet(
 
     def perform_create(self, serializer):
         course = serializer.save(owner=self.request.user)
-        apply_planned_pieces(course, self.request.user)
 
     @action(detail=True, methods=["get", "post"])
     def roster(self, request, **kwargs):

@@ -158,6 +158,20 @@ class Curriculum(models.Model):
     def __str__(self):
         return f"{self.name}: {self.course.name}"
 
+    def copy(self, course, name=None):
+        """A new curriculum for course with the same piece plans, in the same
+        order. The piece plans themselves are shared, not duplicated."""
+        new = Curriculum.objects.create(
+            name=name or self.name, ordered=self.ordered, course=course
+        )
+        CurriculumEntry.objects.bulk_create(
+            CurriculumEntry(
+                curriculum=new, piece_plan_id=e.piece_plan_id, order=e.order
+            )
+            for e in self.curriculumentry_set.all()
+        )
+        return new
+
 
 class CurriculumEntry(models.Model):
 

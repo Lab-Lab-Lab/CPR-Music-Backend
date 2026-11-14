@@ -1,16 +1,15 @@
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
+from django.http import HttpResponseRedirect
+from django.urls import reverse
+from django.utils.html import format_html
 from reversion.admin import VersionAdmin
 
-from teleband.studies.models import (
-    PlannedPiece,
-    Study,
-    StudyParticipant,
-    Survey,
-    SurveyCompletion,
-)
+from teleband.assignments.models import Curriculum
+from teleband.studies.models import Study, StudyParticipant, Survey, SurveyCompletion
 from teleband.studies.services import (
+    create_study_course,
     get_or_create_teacher,
     mark_consented_outside_app,
     send_invitation_email_on_commit,
@@ -82,14 +81,6 @@ class StudyAdmin(VersionAdmin):
         self.message_user(request, f"Revoked the previous secret on {n} study(ies).")
 
 
-class PlannedPieceInline(admin.TabularInline):
-    model = PlannedPiece
-    extra = 1
-    filter_horizontal = ("activities",)
-    verbose_name = "piece and activities"
-    verbose_name_plural = "pieces and activities to assign"
-
-
 class InviteTeacherForm(forms.ModelForm):
     """Add form: a researcher enters a teacher's email and picks a study. The
     teacher is emailed a link to that study's Qualtrics consent survey, unless
@@ -107,12 +98,46 @@ class InviteTeacherForm(forms.ModelForm):
         ),
     )
 
+    COPY, NEW = "copy", "new"
+    curriculum_choice = forms.ChoiceField(
+        label="Curriculum",
+        choices=[
+            (COPY, "Copy an existing curriculum"),
+            (NEW, "Create a new curriculum"),
+        ],
+        initial=COPY,
+        widget=forms.RadioSelect,
+        help_text=(
+            "A course is created for this teacher with this curriculum. The "
+            "teacher assigns its piece plans when they're ready. A new "
+            "curriculum starts empty; you're taken to it to add piece plans "
+            "after saving."
+        ),
+    )
+    copy_from = forms.ModelChoiceField(
+        queryset=Curriculum.objects.select_related("course").order_by("name", "id"),
+        required=False,
+        label="Curriculum to copy",
+    )
+    new_curriculum_name = forms.CharField(
+        max_length=255,
+        required=False,
+        label="New curriculum name",
+        help_text="Defaults to the study name and teacher's email, like the course.",
+    )
+
     class Meta:
         model = StudyParticipant
         fields = ("study",)
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned.get("curriculum_choice") == self.COPY and not cleaned.get(
+            "copy_from"
+        ):
+            self.add_error(
+                "copy_from", "Choose a curriculum to copy, or create a new one."
+            )
         study, email = cleaned.get("study"), cleaned.get("teacher_email")
         if (
             study
@@ -149,15 +174,16 @@ class StudyParticipantAdmin(VersionAdmin):
     )
     list_filter = ("study", "status", "condition")
     search_fields = ("pid", "user__username", "user__email", "qualtrics_response_id")
-    raw_id_fields = ("user",)
+    raw_id_fields = ("user", "curriculum")
     readonly_fields = (
         "pid",
+        "curriculum_link",
+        "course_link",
         "created_at",
         "consented_at",
         "withdrawn_at",
         "consented_outside_app",
     )
-    inlines = (PlannedPieceInline,)
     actions = ("resend_invitation",)
 
     def get_form(self, request, obj=None, **kwargs):
@@ -167,8 +193,30 @@ class StudyParticipantAdmin(VersionAdmin):
 
     def get_fields(self, request, obj=None):
         if obj is None:
-            return ("study", "teacher_email", "consented_outside_app")
+            return (
+                "study",
+                "teacher_email",
+                "consented_outside_app",
+                "curriculum_choice",
+                "copy_from",
+                "new_curriculum_name",
+            )
         return super().get_fields(request, obj)
+
+    @admin.display(description="Edit curriculum")
+    def curriculum_link(self, obj):
+        if obj.curriculum_id is None:
+            return "-"
+        url = reverse("admin:assignments_curriculum_change", args=[obj.curriculum_id])
+        return format_html('<a href="{}">{}</a>', url, obj.curriculum)
+
+    @admin.display(description="Course")
+    def course_link(self, obj):
+        if obj.curriculum_id is None:
+            return "-"
+        course = obj.curriculum.course
+        url = reverse("admin:courses_course_change", args=[course.pk])
+        return format_html('<a href="{}">{}</a>', url, course)
 
     def get_readonly_fields(self, request, obj=None):
         if obj is None:
@@ -177,10 +225,34 @@ class StudyParticipantAdmin(VersionAdmin):
 
     def save_model(self, request, obj, form, change):
         if not change:
-            obj.user = get_or_create_teacher(form.cleaned_data["teacher_email"])
-            if form.cleaned_data["consented_outside_app"]:
+            data = form.cleaned_data
+            obj.user = get_or_create_teacher(data["teacher_email"])
+            if data["consented_outside_app"]:
                 mark_consented_outside_app(obj)
+            course = create_study_course(obj)
+            if data["curriculum_choice"] == InviteTeacherForm.COPY:
+                obj.curriculum = data["copy_from"].copy(course, name=course.name)
+            else:
+                obj.curriculum = Curriculum.objects.create(
+                    name=data["new_curriculum_name"] or course.name, course=course
+                )
         super().save_model(request, obj, form, change)
+
+    def response_add(self, request, obj, post_url_continue=None):
+        # A new curriculum is empty, so take the researcher straight to it.
+        if (
+            obj.curriculum_id
+            and not obj.curriculum.piece_plans.exists()
+            and "_addanother" not in request.POST
+            and "_continue" not in request.POST
+        ):
+            self.message_user(
+                request, f"Now add piece plans to {obj.user.email}'s curriculum."
+            )
+            return HttpResponseRedirect(
+                reverse("admin:assignments_curriculum_change", args=[obj.curriculum_id])
+            )
+        return super().response_add(request, obj, post_url_continue)
 
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)

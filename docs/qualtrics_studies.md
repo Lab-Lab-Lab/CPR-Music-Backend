@@ -89,7 +89,7 @@ Build this once, save it to the Qualtrics Library, and copy it for each study.
 If consent was obtained outside Qualtrics, tick **Consent obtained outside the app** instead. The teacher must already have an account. No email is sent; they become `active` right away and follow-up surveys count from today.
 
 - An account is created if none exists (username = email, no password, email marked verified) and added to the `Teacher` group.
-- After saving, add **pieces and activities to assign** on the participant's page. They are assigned to each course the teacher creates while consented or active.
+- Choose the teacher's **curriculum**: copy an existing one, or create a new one (after saving you're taken to it to add piece plans). Saving creates a course for the teacher, named after the study and their email (they can rename it), enrolls them as its teacher, and ties the curriculum to it. Nothing is assigned: the teacher assigns the curriculum's piece plans when they're ready. The participant's page links to the curriculum and course.
 - The invitation email (`teleband/templates/studies/email/`) is sent when the participant is created. Use the **Resend invitation email** action for pending participants.
 
 After consenting, a teacher with no password is sent to allauth's set-password page. That link is valid until their password changes.
