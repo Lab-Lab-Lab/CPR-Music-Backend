@@ -301,7 +301,9 @@ REST_FRAMEWORK = {
 }
 
 # django-cors-headers - https://github.com/adamchainz/django-cors-headers#setup
-CORS_URLS_REGEX = r"^/api/.*$"
+# /auth-token/ is included so the frontend can log in and out straight from the
+# browser (POST to get a token, DELETE to revoke it) without a server in between.
+CORS_URLS_REGEX = r"^/(api/.*|auth-token/)$"
 # Your stuff...
 # CORS_ALLOW_ALL_ORIGINS = True
 # CORS_ALLOWED_ORIGIN_REGEXES = [
